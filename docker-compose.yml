@@ -1,0 +1,30 @@
+services:
+  openbao:
+    image: openbao/openbao:latest
+    container_name: openbao
+    ports:
+      - "8200:8200"
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: "root"
+      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    cap_add:
+      - IPC_LOCK
+    command: server -dev
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+
+  tnt-engine:
+    build: .
+    container_name: tnt-engine
+    ports:
+      - "8000:8000"
+    environment:
+      OPENBAO_ADDR: "http://openbao:8200"
+      OPENBAO_TOKEN: "root"
+    depends_on:
+      openbao:
+        condition: service_healthy
