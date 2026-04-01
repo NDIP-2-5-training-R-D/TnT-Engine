@@ -46,7 +46,8 @@ A FastAPI microservice that wraps [OpenBao](https://openbao.org/) transit secret
 
 ### Prerequisites
 - Docker ≥ 24 and Docker Compose v2
-- `curl` and `jq` (for the smoke test)
+- `curl` and `jq` (for the smoke test — Linux/macOS)
+- On Windows: use **Git Bash**, **WSL**, or the PowerShell equivalents shown below
 
 ### 1 — Start the stack
 
@@ -65,8 +66,14 @@ This starts:
 
 The init script prints `ROLE_ID` and `SECRET_ID` to its logs:
 
+**Bash / Git Bash / WSL:**
 ```bash
 docker compose logs openbao-init | grep -E "ROLE_ID|SECRET_ID"
+```
+
+**PowerShell:**
+```powershell
+docker compose logs openbao-init | Select-String "ROLE_ID|SECRET_ID"
 ```
 
 Example output:
@@ -77,8 +84,15 @@ SECRET_ID=8d4b3c2a-1e7f-4a9b-8c6d-5e2f1b0a9d8e
 
 ### 3 — Configure credentials
 
+**Bash / Git Bash / WSL:**
 ```bash
 cp .env.example .env
+# Edit .env and set OPENBAO_ROLE_ID and OPENBAO_SECRET_ID
+```
+
+**PowerShell:**
+```powershell
+Copy-Item .env.example .env
 # Edit .env and set OPENBAO_ROLE_ID and OPENBAO_SECRET_ID
 ```
 
@@ -90,6 +104,7 @@ docker compose up -d crypto-adapter
 
 ### 5 — Smoke test
 
+**Bash / Git Bash / WSL:**
 ```bash
 # Liveness
 curl http://localhost:8300/health
@@ -107,6 +122,26 @@ CT=$(curl -s -X POST http://localhost:8300/internal/crypto \
 curl -s -X POST http://localhost:8300/internal/crypto \
   -H "Content-Type: application/json" \
   -d "{\"operation\": \"decrypt\", \"input\": \"$CT\"}" | jq .
+```
+
+**PowerShell:**
+```powershell
+# Liveness
+Invoke-WebRequest http://localhost:8300/health | Select-Object -ExpandProperty Content
+
+# HMAC
+Invoke-WebRequest -Method POST http://localhost:8300/internal/crypto `
+  -ContentType "application/json" `
+  -Body '{"operation": "hmac", "input": "hello"}' | Select-Object -ExpandProperty Content | ConvertFrom-Json
+
+# Encrypt → decrypt round-trip
+$CT = (Invoke-WebRequest -Method POST http://localhost:8300/internal/crypto `
+  -ContentType "application/json" `
+  -Body '{"operation": "encrypt", "input": "my-secret"}' | Select-Object -ExpandProperty Content | ConvertFrom-Json).output
+
+Invoke-WebRequest -Method POST http://localhost:8300/internal/crypto `
+  -ContentType "application/json" `
+  -Body "{`"operation`": `"decrypt`", `"input`": `"$CT`"}" | Select-Object -ExpandProperty Content | ConvertFrom-Json
 ```
 
 ---
@@ -182,10 +217,18 @@ Key rotation does **not** invalidate existing ciphertext — OpenBao keeps all p
 
 ### Step 1 — Rotate
 
+**Bash / Git Bash / WSL:**
 ```bash
 curl -s -X POST http://localhost:8300/crypto/rotate-key \
   -H "Content-Type: application/json" \
   -d '{"key_name": "tt-engine-key"}' | jq .
+```
+
+**PowerShell:**
+```powershell
+Invoke-WebRequest -Method POST http://localhost:8300/crypto/rotate-key `
+  -ContentType "application/json" `
+  -Body '{"key_name": "tt-engine-key"}' | Select-Object -ExpandProperty Content | ConvertFrom-Json
 ```
 
 Response:
@@ -195,18 +238,32 @@ Response:
 
 ### Step 2 — Verify new version
 
+**Bash / Git Bash / WSL:**
 ```bash
 curl "http://localhost:8300/crypto/key-info?key_name=tt-engine-key" | jq .latest_version
+```
+
+**PowerShell:**
+```powershell
+(Invoke-WebRequest "http://localhost:8300/crypto/key-info?key_name=tt-engine-key" | Select-Object -ExpandProperty Content | ConvertFrom-Json).latest_version
 ```
 
 ### Step 3 — (Optional) Raise min decryption version
 
 Once you have re-encrypted all data with the new key version, you can prevent decryption with older versions:
 
+**Bash / Git Bash / WSL:**
 ```bash
 curl -s -X POST http://localhost:8300/keys/tt-engine-key/config \
   -H "Content-Type: application/json" \
   -d '{"min_decryption_version": 2}' | jq .
+```
+
+**PowerShell:**
+```powershell
+Invoke-WebRequest -Method POST http://localhost:8300/keys/tt-engine-key/config `
+  -ContentType "application/json" `
+  -Body '{"min_decryption_version": 2}' | Select-Object -ExpandProperty Content | ConvertFrom-Json
 ```
 
 > **Warning:** Setting `min_decryption_version` higher than the version used to encrypt any stored data will permanently prevent decryption of that data.
