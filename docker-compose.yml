@@ -17,6 +17,20 @@ services:
       retries: 15
       start_period: 5s
 
+  openbao-init:
+    image: openbao/openbao:latest
+    container_name: openbao-init
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      BAO_ADDR: "http://openbao:8200"
+      BAO_TOKEN: "root"
+    volumes:
+      - ./scripts/init-openbao.sh:/init-openbao.sh:ro
+    entrypoint: ["/bin/sh", "/init-openbao.sh"]
+    restart: "no"
+
   tnt-engine:
     build: .
     container_name: tnt-engine
@@ -28,3 +42,5 @@ services:
     depends_on:
       openbao:
         condition: service_healthy
+      openbao-init:
+        condition: service_completed_successfully
