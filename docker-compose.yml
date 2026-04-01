@@ -23,7 +23,7 @@ services:
         condition: service_healthy
     volumes:
       - ./infra/openbao/init-scripts:/scripts
-    command: sh -c "tr -d '\r' < /scripts/01-init-openbao.sh > /tmp/init.sh && sh /tmp/init.sh"
+    command: sh -c "tr -d '\\015' < /scripts/01-init-openbao.sh > /tmp/init.sh && sh /tmp/init.sh"
     restart: on-failure
     networks:
       - tt-net
