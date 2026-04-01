@@ -19,82 +19,118 @@ done
 echo "OpenBao is healthy."
 
 # ---------------------------------------------------------------------------
+# Helper: idempotent mount — succeeds even if already enabled
+# ---------------------------------------------------------------------------
+
+enable_engine() {
+  _path="$1"
+  _type="$2"
+  _label="$3"
+  echo "Enabling ${_label} engine at ${_path}..."
+  _status=$(curl -s -o /dev/null -w "%{http_code}" \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --request POST \
+    --data "{\"type\":\"${_type}\"}" \
+    "${VAULT_ADDR}/v1/sys/mounts/${_path}")
+  if [ "$_status" = "204" ] || [ "$_status" = "200" ]; then
+    echo "  ${_label} engine enabled."
+    return 0
+  elif [ "$_status" = "400" ]; then
+    echo "  ${_label} engine already enabled (skipped)."
+    return 0
+  else
+    echo "  WARNING: ${_label} engine returned HTTP ${_status}."
+    return 1
+  fi
+}
+
+enable_auth() {
+  _path="$1"
+  _type="$2"
+  _label="$3"
+  echo "Enabling ${_label} auth at ${_path}..."
+  _status=$(curl -s -o /dev/null -w "%{http_code}" \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --request POST \
+    --data "{\"type\":\"${_type}\"}" \
+    "${VAULT_ADDR}/v1/sys/auth/${_path}")
+  if [ "$_status" = "204" ] || [ "$_status" = "200" ]; then
+    echo "  ${_label} auth enabled."
+    return 0
+  elif [ "$_status" = "400" ]; then
+    echo "  ${_label} auth already enabled (skipped)."
+    return 0
+  else
+    echo "  WARNING: ${_label} auth returned HTTP ${_status}."
+    return 1
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Transit secrets engine
 # ---------------------------------------------------------------------------
 
-echo "Enabling transit engine..."
-curl -sf \
-  --header "X-Vault-Token: ${VAULT_TOKEN}" \
-  --request POST \
-  --data '{"type":"transit"}' \
-  "${VAULT_ADDR}/v1/sys/mounts/transit" > /dev/null
+enable_engine "transit" "transit" "Transit"
 
 echo "Creating transit key 'tt-engine-key' (aes256-gcm96)..."
 curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
   --request POST \
   --data '{"type":"aes256-gcm96"}' \
-  "${VAULT_ADDR}/v1/transit/keys/tt-engine-key" > /dev/null
+  "${VAULT_ADDR}/v1/transit/keys/tt-engine-key" > /dev/null 2>&1 || echo "  Key already exists (skipped)."
 
 # ---------------------------------------------------------------------------
 # Transform secrets engine (format-preserving encryption)
+# Not supported in all OpenBao builds — failures are non-fatal.
 # ---------------------------------------------------------------------------
 
-echo "Enabling transform engine..."
-curl -sf \
-  --header "X-Vault-Token: ${VAULT_TOKEN}" \
-  --request POST \
-  --data '{"type":"transform"}' \
-  "${VAULT_ADDR}/v1/sys/mounts/transform" > /dev/null
+if enable_engine "transform" "transform" "Transform"; then
+  echo "Creating transform role 'tt-engine'..."
+  curl -sf \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --request POST \
+    --data '{"transformations":["tt-fpe-ccn"]}' \
+    "${VAULT_ADDR}/v1/transform/role/tt-engine" > /dev/null 2>&1 || echo "  Transform role already exists (skipped)."
 
-echo "Creating transform role 'tt-engine'..."
-curl -sf \
-  --header "X-Vault-Token: ${VAULT_TOKEN}" \
-  --request POST \
-  --data '{"transformations":["tt-fpe-ccn"]}' \
-  "${VAULT_ADDR}/v1/transform/role/tt-engine" > /dev/null
+  echo "Creating FPE transformation 'tt-fpe-ccn' (credit-card numbers)..."
+  curl -sf \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --request POST \
+    --data '{
+      "type": "fpe",
+      "template": "builtin/creditcardnumber",
+      "tweak_source": "internal",
+      "allowed_roles": ["tt-engine"]
+    }' \
+    "${VAULT_ADDR}/v1/transform/transformations/fpe/tt-fpe-ccn" > /dev/null 2>&1 || echo "  FPE CCN transformation already exists (skipped)."
 
-echo "Creating FPE transformation 'tt-fpe-ccn' (credit-card numbers)..."
-curl -sf \
-  --header "X-Vault-Token: ${VAULT_TOKEN}" \
-  --request POST \
-  --data '{
-    "type": "fpe",
-    "template": "builtin/creditcardnumber",
-    "tweak_source": "internal",
-    "allowed_roles": ["tt-engine"]
-  }' \
-  "${VAULT_ADDR}/v1/transform/transformations/fpe/tt-fpe-ccn" > /dev/null
+  echo "Creating FPE transformation 'tt-fpe-ssn' (US social security numbers)..."
+  curl -sf \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --request POST \
+    --data '{
+      "type": "fpe",
+      "template": "builtin/socialsecuritynumber",
+      "tweak_source": "internal",
+      "allowed_roles": ["tt-engine"]
+    }' \
+    "${VAULT_ADDR}/v1/transform/transformations/fpe/tt-fpe-ssn" > /dev/null 2>&1 || echo "  FPE SSN transformation already exists (skipped)."
 
-echo "Creating FPE transformation 'tt-fpe-ssn' (US social security numbers)..."
-curl -sf \
-  --header "X-Vault-Token: ${VAULT_TOKEN}" \
-  --request POST \
-  --data '{
-    "type": "fpe",
-    "template": "builtin/socialsecuritynumber",
-    "tweak_source": "internal",
-    "allowed_roles": ["tt-engine"]
-  }' \
-  "${VAULT_ADDR}/v1/transform/transformations/fpe/tt-fpe-ssn" > /dev/null
-
-# Update role to include the SSN transformation as well
-curl -sf \
-  --header "X-Vault-Token: ${VAULT_TOKEN}" \
-  --request POST \
-  --data '{"transformations":["tt-fpe-ccn","tt-fpe-ssn"]}' \
-  "${VAULT_ADDR}/v1/transform/role/tt-engine" > /dev/null
+  # Update role to include the SSN transformation as well
+  curl -sf \
+    --header "X-Vault-Token: ${VAULT_TOKEN}" \
+    --request POST \
+    --data '{"transformations":["tt-fpe-ccn","tt-fpe-ssn"]}' \
+    "${VAULT_ADDR}/v1/transform/role/tt-engine" > /dev/null 2>&1 || true
+else
+  echo "  Transform engine not available — skipping FPE setup."
+fi
 
 # ---------------------------------------------------------------------------
 # AppRole auth
 # ---------------------------------------------------------------------------
 
-echo "Enabling AppRole auth..."
-curl -sf \
-  --header "X-Vault-Token: ${VAULT_TOKEN}" \
-  --request POST \
-  --data '{"type":"approle"}' \
-  "${VAULT_ADDR}/v1/sys/auth/approle" > /dev/null
+enable_auth "approle" "approle" "AppRole"
 
 echo "Creating policy 'tt-engine-policy'..."
 curl -sf \
