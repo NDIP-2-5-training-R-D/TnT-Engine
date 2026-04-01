@@ -21,8 +21,6 @@ import httpx
 import pytest
 import pytest_asyncio
 
-pytestmark = pytest.mark.integration
-
 BASE_URL = os.getenv("INTEGRATION_BASE_URL", "http://localhost:8300")
 
 
@@ -55,6 +53,7 @@ def _assert_error_schema(body: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_full_hmac_flow(client: httpx.AsyncClient):
     resp = await client.post(
@@ -76,6 +75,7 @@ async def test_full_hmac_flow(client: httpx.AsyncClient):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_hmac_deterministic(client: httpx.AsyncClient):
     results = []
@@ -95,6 +95,7 @@ async def test_hmac_deterministic(client: httpx.AsyncClient):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_encrypt_decrypt_roundtrip(client: httpx.AsyncClient):
     original = "super-secret-payload"
@@ -120,6 +121,7 @@ async def test_encrypt_decrypt_roundtrip(client: httpx.AsyncClient):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_tokenize_detokenize_roundtrip(client: httpx.AsyncClient):
     original = "PAN:4111111111111111"
@@ -145,6 +147,7 @@ async def test_tokenize_detokenize_roundtrip(client: httpx.AsyncClient):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_batch_mixed_operations(client: httpx.AsyncClient):
     items = [
@@ -173,6 +176,7 @@ async def test_batch_mixed_operations(client: httpx.AsyncClient):
     assert results[2]["output"].startswith("vault:")
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_batch_100_mixed_ops_under_2s(client: httpx.AsyncClient):
     """Acceptance criterion: 100 mixed ops complete in < 2 s."""
@@ -333,6 +337,7 @@ def test_audit_log_no_sensitive_data():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_error_response_schema_on_invalid_input(client: httpx.AsyncClient):
     resp = await client.post(
@@ -345,6 +350,7 @@ async def test_error_response_schema_on_invalid_input(client: httpx.AsyncClient)
     assert "x-request-id" in resp.headers
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_x_request_id_propagated_on_success(client: httpx.AsyncClient):
     custom_id = "test-req-abc-123"
@@ -357,6 +363,7 @@ async def test_x_request_id_propagated_on_success(client: httpx.AsyncClient):
     assert resp.headers.get("x-request-id") == custom_id
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_batch_rejects_over_500_items(client: httpx.AsyncClient):
     items = [{"operation": "hmac", "input": str(i)} for i in range(501)]
