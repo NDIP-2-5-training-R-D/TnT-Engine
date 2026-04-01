@@ -1,30 +1,35 @@
 services:
   openbao:
-    image: openbao/openbao:latest
-    container_name: openbao
+    image: quay.io/openbao/openbao:2.0.0
+    command: bao server -dev
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: root
+      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
     ports:
       - "8200:8200"
-    environment:
-      BAO_DEV_ROOT_TOKEN_ID: "root"
-      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
-    cap_add:
-      - IPC_LOCK
-    command: server -dev
     healthcheck:
-      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8200/v1/sys/health || exit 1"]
       interval: 5s
       timeout: 3s
-      retries: 15
-      start_period: 5s
+      retries: 10
 
-  tnt-engine:
-    build: .
-    container_name: tnt-engine
-    ports:
-      - "8000:8000"
-    environment:
-      OPENBAO_ADDR: "http://openbao:8200"
-      OPENBAO_TOKEN: "root"
+  openbao-init:
+    image: curlimages/curl:latest
     depends_on:
       openbao:
         condition: service_healthy
+    volumes:
+      - ./infra/openbao/init-scripts:/scripts
+    command: sh /scripts/01-init-openbao.sh
+    restart: on-failure
+
+  crypto-adapter:
+    build: .
+    ports:
+      - "8300:8300"
+    depends_on:
+      openbao:
+        condition: service_healthy
+    env_file:
+      - .env
+    restart: unless-stopped

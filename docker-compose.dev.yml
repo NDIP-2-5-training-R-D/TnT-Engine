@@ -1,0 +1,9 @@
+# Development overrides — mount source for live reload
+services:
+  crypto-adapter:
+    build: .
+    volumes:
+      - ./src:/app/src
+    command: uvicorn crypto_adapter.main:app --host 0.0.0.0 --port 8300 --reload
+    environment:
+      LOG_LEVEL: DEBUG
