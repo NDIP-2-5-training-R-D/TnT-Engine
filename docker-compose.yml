@@ -30,6 +30,8 @@ services:
     depends_on:
       openbao:
         condition: service_healthy
+      openbao-init:
+        condition: service_completed_successfully
     env_file:
       - .env
     restart: unless-stopped
