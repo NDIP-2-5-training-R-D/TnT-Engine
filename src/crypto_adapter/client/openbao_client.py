@@ -115,3 +115,9 @@ class OpenBaoClient:
         await with_retry(
             lambda: self._request("POST", f"/v1/transit/keys/{key_name}/rotate")
         )
+
+    async def set_key_config(self, key_name: str, config: dict) -> None:
+        """Update configuration (e.g. min_decryption_version) for the named transit key."""
+        await with_retry(
+            lambda: self._request("POST", f"/v1/transit/keys/{key_name}/config", config)
+        )

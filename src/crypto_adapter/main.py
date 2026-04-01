@@ -7,6 +7,8 @@ from crypto_adapter.client.openbao_client import OpenBaoClient
 from crypto_adapter.config import get_settings
 from crypto_adapter.routers import health
 from crypto_adapter.routers import crypto
+from crypto_adapter.routers import tokenize
+from crypto_adapter.routers import key_management
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -15,6 +17,8 @@ app = FastAPI(title="TT Crypto Adapter", version="0.1.0")
 
 app.include_router(health.router)
 app.include_router(crypto.router, prefix="/crypto")
+app.include_router(tokenize.router)
+app.include_router(key_management.router, prefix="/keys")
 
 # Module-level singletons — populated during startup
 _auth_instance: AppRoleAuth | None = None
