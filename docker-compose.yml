@@ -20,7 +20,7 @@ services:
         condition: service_healthy
     volumes:
       - ./infra/openbao/init-scripts:/scripts
-    command: sh /scripts/01-init-openbao.sh
+    command: sh -c "sed -i 's/\r//' /scripts/01-init-openbao.sh && sh /scripts/01-init-openbao.sh"
     restart: on-failure
 
   crypto-adapter:
