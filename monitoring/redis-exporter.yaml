@@ -1,0 +1,23 @@
+# Redis metrics exporter.
+# Exposes Redis INFO stats as Prometheus metrics.
+#
+# Install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install redis-exporter prometheus-community/prometheus-redis-exporter \
+#     --namespace tnt-engine \
+#     --values monitoring/redis-exporter.yaml
+
+redisAddress: redis://redis.tnt-engine.svc.cluster.local:6379
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  namespace: tnt-engine
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 32Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi

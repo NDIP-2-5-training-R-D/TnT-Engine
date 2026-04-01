@@ -1,0 +1,55 @@
+# PostgreSQL metrics exporter.
+# Deploys postgres_exporter as a sidecar-like pod that scrapes
+# pg_stat_* views and exposes them as Prometheus metrics.
+#
+# Install the exporter:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install pg-exporter prometheus-community/prometheus-postgres-exporter \
+#     --namespace tnt-engine \
+#     --values monitoring/postgres-exporter.yaml
+
+config:
+  datasource:
+    host: postgres.tnt-engine.svc.cluster.local
+    port: 5432
+    user: tnt
+    database: tnt_engine
+    sslmode: disable
+    passwordSecret:
+      name: tnt-engine
+      key: TNT_DB_PASSWORD
+
+  # Custom queries for T&T Engine tables
+  queries:
+    tnt_token_count:
+      query: "SELECT tenant_id, status::text, count(*) as count FROM token_store GROUP BY tenant_id, status"
+      metrics:
+        - tenant_id:
+            usage: "LABEL"
+        - status:
+            usage: "LABEL"
+        - count:
+            usage: "GAUGE"
+            description: "Number of tokens by tenant and status"
+
+    tnt_audit_rate:
+      query: "SELECT action, count(*) as count FROM audit_log WHERE performed_at > now() - interval '5 minutes' GROUP BY action"
+      metrics:
+        - action:
+            usage: "LABEL"
+        - count:
+            usage: "GAUGE"
+            description: "Audit log entries in last 5 minutes"
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  namespace: tnt-engine
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi

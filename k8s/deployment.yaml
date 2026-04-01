@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tnt-engine
+  namespace: tnt-engine
+  labels:
+    app: tnt-engine
+    version: v0.4.0
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5                    # keep 5 rollback versions
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1                            # add 1 pod at a time
+      maxUnavailable: 0                      # zero downtime
+  selector:
+    matchLabels:
+      app: tnt-engine
+  template:
+    metadata:
+      labels:
+        app: tnt-engine
+        version: v0.4.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      terminationGracePeriodSeconds: 30
+      serviceAccountName: tnt-engine
+
+      # Anti-affinity: spread pods across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: ["tnt-engine"]
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: tnt-engine
+          image: ghcr.io/geic/tnt-engine:v0.4.0
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+
+          envFrom:
+            - configMapRef:
+                name: tnt-engine-config
+            - secretRef:
+                name: tnt-engine-secrets
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+
+          # Readiness: accept traffic only when healthy
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # Liveness: restart if unresponsive
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # Startup: give slow starts time before liveness kicks in
+          startupProbe:
+            httpGet:
+              path: /api/v1/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12              # 60s max startup
+
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

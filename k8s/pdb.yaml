@@ -1,0 +1,12 @@
+# Pod Disruption Budget — always keep at least 2 pods running
+# during voluntary disruptions (node drain, cluster upgrade).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tnt-engine
+  namespace: tnt-engine
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: tnt-engine

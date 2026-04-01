@@ -1,0 +1,28 @@
+# ServiceMonitor for Prometheus Operator.
+# Replaces annotation-based scraping with a proper CRD that supports
+# relabeling, TLS, and multi-port scraping.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tnt-engine
+  namespace: tnt-engine
+  labels:
+    app: tnt-engine
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tnt-engine
+  namespaceSelector:
+    matchNames:
+      - tnt-engine
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      # Add namespace and pod labels to all metrics
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod

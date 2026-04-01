@@ -1,0 +1,78 @@
+{
+  "title": "T&T Engine — Infrastructure",
+  "uid": "tnt-infra",
+  "timezone": "utc",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      { "name": "namespace", "type": "constant", "current": { "value": "tnt-engine" } }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Pod CPU Usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" } },
+      "targets": [
+        { "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"$namespace\", container=\"tnt-engine\"}[5m])) by (pod)", "legendFormat": "{{ pod }}" }
+      ]
+    },
+    {
+      "title": "Pod Memory Usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [
+        { "expr": "sum(container_memory_working_set_bytes{namespace=\"$namespace\", container=\"tnt-engine\"}) by (pod)", "legendFormat": "{{ pod }}" }
+      ]
+    },
+    {
+      "title": "Pod Restarts",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"$namespace\", container=\"tnt-engine\"}[1h])) by (pod)", "legendFormat": "{{ pod }}" }
+      ]
+    },
+    {
+      "title": "Replicas",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "targets": [
+        { "expr": "kube_deployment_spec_replicas{namespace=\"$namespace\", deployment=\"tnt-engine\"}", "legendFormat": "desired" },
+        { "expr": "kube_deployment_status_replicas_available{namespace=\"$namespace\", deployment=\"tnt-engine\"}", "legendFormat": "available" },
+        { "expr": "kube_deployment_status_replicas_unavailable{namespace=\"$namespace\", deployment=\"tnt-engine\"}", "legendFormat": "unavailable" }
+      ]
+    },
+    {
+      "title": "HPA Status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        { "expr": "kube_horizontalpodautoscaler_spec_min_replicas{namespace=\"$namespace\"}", "legendFormat": "min" },
+        { "expr": "kube_horizontalpodautoscaler_spec_max_replicas{namespace=\"$namespace\"}", "legendFormat": "max" },
+        { "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"$namespace\"}", "legendFormat": "current" }
+      ]
+    },
+    {
+      "title": "Network Receive",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "targets": [
+        { "expr": "sum(rate(container_network_receive_bytes_total{namespace=\"$namespace\"}[5m])) by (pod)", "legendFormat": "{{ pod }}" }
+      ]
+    },
+    {
+      "title": "Network Transmit",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "Bps" } },
+      "targets": [
+        { "expr": "sum(rate(container_network_transmit_bytes_total{namespace=\"$namespace\"}[5m])) by (pod)", "legendFormat": "{{ pod }}" }
+      ]
+    }
+  ]
+}

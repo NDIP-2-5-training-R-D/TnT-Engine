@@ -1,0 +1,69 @@
+# Reusable Helm-based deployment templates.
+#
+# Required variables:
+#   SERVICE_NAME  — e.g. "tnt-engine"
+#   KUBE_CONTEXT  — kubectl context for the target cluster
+#   HELM_VALUES   — path to environment values file (e.g. helm/values-dev.yaml)
+#   IMAGE         — full image URI with tag (from build stage)
+#   NAMESPACE     — k8s namespace (default: tnt-engine)
+
+.deploy_base:
+  image:
+    name: alpine/helm:3.14.0
+    entrypoint: [""]
+  variables:
+    NAMESPACE: "tnt-engine"
+    HELM_CHART: "./helm/tnt-engine"
+    HELM_VALUES: "./helm/values-dev.yaml"
+    DEPLOY_TIMEOUT: "180s"
+  script:
+    - kubectl config use-context "${KUBE_CONTEXT}"
+
+    # Create namespace if it doesn't exist
+    - kubectl get namespace "${NAMESPACE}" || kubectl create namespace "${NAMESPACE}"
+
+    # Apply secrets from CI variables (Helm will manage ConfigMap via chart)
+    - |
+      kubectl -n "${NAMESPACE}" create secret generic "${SERVICE_NAME}-ci-secrets" \
+        --from-literal=TNT_DB_USER="${TNT_DB_USER}" \
+        --from-literal=TNT_DB_PASSWORD="${TNT_DB_PASSWORD}" \
+        --from-literal=TNT_CRYPTO_TOKEN="${TNT_CRYPTO_TOKEN}" \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    # Helm upgrade --install (idempotent: creates on first run, upgrades after)
+    - |
+      echo "Deploying ${SERVICE_NAME} to ${NAMESPACE} with image ${IMAGE}"
+      helm upgrade --install "${SERVICE_NAME}" "${HELM_CHART}" \
+        --namespace "${NAMESPACE}" \
+        --values "${HELM_VALUES}" \
+        --set image.tag="${CI_COMMIT_SHORT_SHA}" \
+        --set "secrets.TNT_DB_USER=${TNT_DB_USER}" \
+        --set "secrets.TNT_DB_PASSWORD=${TNT_DB_PASSWORD}" \
+        --set "secrets.TNT_CRYPTO_TOKEN=${TNT_CRYPTO_TOKEN}" \
+        --timeout "${DEPLOY_TIMEOUT}" \
+        --wait \
+        --atomic \
+        --history-max 5
+
+    - echo "Helm release status:"
+    - helm -n "${NAMESPACE}" status "${SERVICE_NAME}"
+    - echo ""
+    - echo "Running pods:"
+    - kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/name=${SERVICE_NAME}" -o wide
+
+# ── Manual rollback (one-click in GitLab UI) ──────────────────────
+
+.rollback:
+  image:
+    name: alpine/helm:3.14.0
+    entrypoint: [""]
+  variables:
+    NAMESPACE: "tnt-engine"
+  script:
+    - kubectl config use-context "${KUBE_CONTEXT}"
+    - echo "Rolling back ${SERVICE_NAME} to previous revision"
+    - helm -n "${NAMESPACE}" rollback "${SERVICE_NAME}" 0 --wait --timeout 120s
+    - echo "Rollback complete. Current status:"
+    - helm -n "${NAMESPACE}" status "${SERVICE_NAME}"
+    - kubectl -n "${NAMESPACE}" get pods -l "app.kubernetes.io/name=${SERVICE_NAME}"
+  when: manual

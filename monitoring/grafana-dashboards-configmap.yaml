@@ -1,0 +1,33 @@
+# ConfigMap that auto-provisions dashboards into Grafana.
+# The kube-prometheus-stack Grafana sidecar watches for ConfigMaps
+# with label grafana_dashboard=1 and loads them automatically.
+#
+# Apply: kubectl apply -f monitoring/grafana-dashboards-configmap.yaml
+# Or use Makefile: make dashboards
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tnt-engine-dashboards
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  tnt-overview.json: |
+    {{ include the JSON from monitoring/dashboards/tnt-overview.json }}
+  tnt-infrastructure.json: |
+    {{ include the JSON from monitoring/dashboards/tnt-infrastructure.json }}
+  tnt-dependencies.json: |
+    {{ include the JSON from monitoring/dashboards/tnt-dependencies.json }}
+
+---
+# NOTE: In practice, use the script below to generate this ConfigMap
+# from the JSON files, rather than manually inlining:
+#
+#   kubectl -n monitoring create configmap tnt-engine-dashboards \
+#     --from-file=tnt-overview.json=monitoring/dashboards/tnt-overview.json \
+#     --from-file=tnt-infrastructure.json=monitoring/dashboards/tnt-infrastructure.json \
+#     --from-file=tnt-dependencies.json=monitoring/dashboards/tnt-dependencies.json \
+#     --dry-run=client -o yaml | \
+#     kubectl label -f - --local grafana_dashboard=1 -o yaml | \
+#     kubectl apply -f -

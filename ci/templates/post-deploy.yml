@@ -1,0 +1,57 @@
+# Reusable post-deploy verification template.
+# Runs health checks and basic smoke tests after deployment.
+
+.health_check:
+  image:
+    name: bitnami/kubectl:1.29
+    entrypoint: [""]
+  variables:
+    NAMESPACE: "tnt-engine"
+    HEALTH_RETRIES: "10"
+    HEALTH_INTERVAL: "5"
+  script:
+    - kubectl config use-context "${KUBE_CONTEXT}"
+
+    # Wait for all pods to be ready
+    - |
+      echo "=== Waiting for pods ==="
+      kubectl -n "${NAMESPACE}" wait --for=condition=ready pod \
+        -l "app=${SERVICE_NAME}" \
+        --timeout=60s
+
+    # Get a pod to run health check
+    - |
+      POD=$(kubectl -n "${NAMESPACE}" get pod -l "app=${SERVICE_NAME}" \
+        -o jsonpath='{.items[0].metadata.name}')
+      echo "Health checking via pod: ${POD}"
+
+    # Retry health check
+    - |
+      for i in $(seq 1 ${HEALTH_RETRIES}); do
+        STATUS=$(kubectl -n "${NAMESPACE}" exec "${POD}" -- \
+          python -c "
+      import urllib.request, json
+      resp = urllib.request.urlopen('http://localhost:8000/api/v1/health')
+      data = json.loads(resp.read())
+      print(json.dumps(data))
+      " 2>/dev/null) && break
+        echo "Attempt ${i}/${HEALTH_RETRIES} failed, retrying in ${HEALTH_INTERVAL}s..."
+        sleep "${HEALTH_INTERVAL}"
+      done
+
+    - |
+      echo "Health check response: ${STATUS}"
+      echo "${STATUS}" | python3 -c "
+      import sys, json
+      data = json.load(sys.stdin)
+      if data.get('status') != 'ok':
+          print('FAIL: health check returned non-ok status')
+          sys.exit(1)
+      cb = data.get('circuit_breaker', 'UNKNOWN')
+      if cb == 'OPEN':
+          print('WARNING: circuit breaker is OPEN')
+          sys.exit(1)
+      print(f'OK: status={data[\"status\"]}, circuit_breaker={cb}')
+      "
+
+    - echo "=== Post-deploy verification passed ==="

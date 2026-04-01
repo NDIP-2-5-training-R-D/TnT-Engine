@@ -1,0 +1,13 @@
+apiVersion: v2
+name: tnt-engine
+description: Enterprise PII Tokenization & Data Governance Platform
+type: application
+version: 0.4.0        # Chart version — increment on chart changes
+appVersion: "0.4.0"   # Application version — matches code release
+keywords:
+  - tokenization
+  - pii
+  - data-platform
+  - encryption
+maintainers:
+  - name: Platform Team

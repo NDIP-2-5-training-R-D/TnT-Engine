@@ -1,0 +1,47 @@
+# Production environment overrides.
+# Full resources, TLS, read replica, tight security.
+
+replicaCount: 3
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: "1Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 30
+  targetCPUUtilizationPercentage: 65
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+  hosts:
+    - host: tnt-engine.internal
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: tnt-engine-tls
+      hosts:
+        - tnt-engine.internal
+
+config:
+  TNT_DB_HOST: "postgres-primary.tnt-engine-prod.svc.cluster.local"
+  TNT_DB_NAME: "tnt_engine"
+  TNT_DB_POOL_MIN: "20"
+  TNT_DB_POOL_MAX: "80"
+  TNT_DB_READ_HOST: "postgres-replica.tnt-engine-prod.svc.cluster.local"
+  TNT_REDIS_URL: "redis://redis.tnt-engine-prod.svc.cluster.local:6379/0"
+  TNT_REDIS_MAX_CONNECTIONS: "100"
+  TNT_CRYPTO_BASE_URL: "http://openbao.tnt-engine-prod.svc.cluster.local:8200/v1"
+  TNT_L1_MAX_SIZE: "50000"
+  TNT_L1_TTL_SECONDS: "600"

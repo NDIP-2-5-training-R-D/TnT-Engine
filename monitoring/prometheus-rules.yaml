@@ -1,0 +1,120 @@
+# Prometheus alerting rules for T&T Engine SLO enforcement.
+# Deploy alongside Prometheus in the monitoring namespace.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tnt-engine-alerts
+  namespace: monitoring
+  labels:
+    app: tnt-engine
+spec:
+  groups:
+    - name: tnt-engine.slo
+      interval: 30s
+      rules:
+        # ── Latency SLO: p99 < 200ms ──────────────────────────────
+        - alert: TNTHighLatency
+          expr: |
+            histogram_quantile(0.99,
+              rate(tnt_http_request_duration_seconds_bucket{endpoint=~"/api/v1/.*"}[5m])
+            ) > 0.200
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "T&T Engine p99 latency above 200ms"
+            description: "p99 latency is {{ $value | humanizeDuration }} (SLO: 200ms)"
+
+        # ── Error rate SLO: < 1% ──────────────────────────────────
+        - alert: TNTHighErrorRate
+          expr: |
+            (
+              sum(rate(tnt_http_requests_total{status=~"5.."}[5m]))
+              /
+              sum(rate(tnt_http_requests_total[5m]))
+            ) > 0.01
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "T&T Engine error rate above 1%"
+            description: "Error rate is {{ $value | humanizePercentage }} (SLO: 1%)"
+
+        # ── Cache hit rate SLO: > 80% ─────────────────────────────
+        - alert: TNTLowCacheHitRate
+          expr: |
+            (
+              sum(rate(tnt_l1_cache_hits_total[10m]))
+              /
+              (sum(rate(tnt_l1_cache_hits_total[10m])) + sum(rate(tnt_l1_cache_misses_total[10m])))
+            ) < 0.80
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "T&T Engine cache hit rate below 80%"
+
+        # ── Circuit breaker open ──────────────────────────────────
+        - alert: TNTCircuitBreakerOpen
+          expr: |
+            tnt_crypto_errors_total > 0
+            and
+            increase(tnt_crypto_errors_total[2m]) > 10
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "T&T Engine crypto service failures — circuit breaker likely open"
+
+        # ── Database latency ──────────────────────────────────────
+        - alert: TNTDatabaseSlow
+          expr: |
+            histogram_quantile(0.99,
+              rate(tnt_db_operation_duration_seconds_bucket[5m])
+            ) > 0.100
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "T&T Engine DB p99 latency above 100ms"
+
+        # ── Redis latency ─────────────────────────────────────────
+        - alert: TNTRedisSlow
+          expr: |
+            histogram_quantile(0.99,
+              rate(tnt_redis_operation_duration_seconds_bucket[5m])
+            ) > 0.050
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "T&T Engine Redis p99 latency above 50ms"
+
+        # ── Rate limiting triggered ───────────────────────────────
+        - alert: TNTRateLimitHit
+          expr: |
+            increase(tnt_rate_limit_exceeded_total[5m]) > 10
+          for: 2m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "T&T Engine rate limits being hit"
+
+        # ── Pod availability ──────────────────────────────────────
+        - alert: TNTPodUnavailable
+          expr: |
+            kube_deployment_status_replicas_available{deployment="tnt-engine"}
+            < kube_deployment_spec_replicas{deployment="tnt-engine"} * 0.5
+          for: 3m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "T&T Engine has less than 50% pods available"

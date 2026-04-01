@@ -1,0 +1,143 @@
+{
+  "dashboard": {
+    "title": "T&T Engine - Production Dashboard",
+    "uid": "tnt-engine-prod",
+    "timezone": "utc",
+    "refresh": "30s",
+    "panels": [
+      {
+        "title": "Request Rate (req/s)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(tnt_http_requests_total[1m]))",
+            "legendFormat": "total"
+          },
+          {
+            "expr": "sum(rate(tnt_http_requests_total{status=~'5..'}[1m]))",
+            "legendFormat": "5xx errors"
+          }
+        ]
+      },
+      {
+        "title": "Latency (p50 / p95 / p99)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(tnt_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p50"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(tnt_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(tnt_http_request_duration_seconds_bucket[5m]))",
+            "legendFormat": "p99"
+          }
+        ]
+      },
+      {
+        "title": "Error Rate (%)",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(tnt_http_requests_total{status=~'5..'}[5m])) / sum(rate(tnt_http_requests_total[5m])) * 100"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 0.5},
+                {"color": "red", "value": 1.0}
+              ]
+            },
+            "unit": "percent",
+            "max": 5
+          }
+        }
+      },
+      {
+        "title": "Cache Hit Rate",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "sum(rate(tnt_l1_cache_hits_total[5m])) / (sum(rate(tnt_l1_cache_hits_total[5m])) + sum(rate(tnt_l1_cache_misses_total[5m]))) * 100"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "green", "value": 80}
+              ]
+            },
+            "unit": "percent",
+            "max": 100
+          }
+        }
+      },
+      {
+        "title": "DB Latency by Operation",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(tnt_db_operation_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{operation}}"
+          }
+        ]
+      },
+      {
+        "title": "Redis Latency by Operation",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(tnt_redis_operation_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{operation}}"
+          }
+        ]
+      },
+      {
+        "title": "Crypto Latency by Operation",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 16},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(tnt_crypto_operation_duration_seconds_bucket[5m]))",
+            "legendFormat": "{{operation}}"
+          }
+        ]
+      },
+      {
+        "title": "Tokens Created",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 16},
+        "targets": [
+          {
+            "expr": "sum(increase(tnt_tokens_created_total[1h]))"
+          }
+        ]
+      },
+      {
+        "title": "Active Pods",
+        "type": "stat",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 16},
+        "targets": [
+          {
+            "expr": "kube_deployment_status_replicas_available{deployment='tnt-engine'}"
+          }
+        ]
+      }
+    ]
+  }
+}

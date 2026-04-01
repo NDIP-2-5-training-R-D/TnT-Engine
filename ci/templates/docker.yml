@@ -1,0 +1,50 @@
+# Reusable Docker build+push template.
+# Any future service includes this and overrides variables.
+#
+# Required variables:
+#   SERVICE_NAME  — e.g. "tnt-engine"
+#   DOCKERFILE    — path to Dockerfile (default: ./Dockerfile)
+#   CONTEXT       — build context (default: .)
+
+.docker_build:
+  image: docker:24-dind
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKERFILE: "./Dockerfile"
+    CONTEXT: "."
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - |
+      IMAGE="${CI_REGISTRY_IMAGE}/${SERVICE_NAME}"
+      TAG_SHA="${IMAGE}:${CI_COMMIT_SHORT_SHA}"
+      TAG_BRANCH="${IMAGE}:${CI_COMMIT_REF_SLUG}"
+
+      echo "Building ${TAG_SHA}"
+      docker build \
+        --file "${DOCKERFILE}" \
+        --tag "${TAG_SHA}" \
+        --tag "${TAG_BRANCH}" \
+        --label "org.opencontainers.image.revision=${CI_COMMIT_SHA}" \
+        --label "org.opencontainers.image.source=${CI_PROJECT_URL}" \
+        "${CONTEXT}"
+
+      docker push "${TAG_SHA}"
+      docker push "${TAG_BRANCH}"
+
+      # Tag as 'latest' on main branch
+      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        docker tag "${TAG_SHA}" "${IMAGE}:latest"
+        docker push "${IMAGE}:latest"
+      fi
+
+      echo "IMAGE=${TAG_SHA}" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+  cache:
+    key: "docker-${SERVICE_NAME}"
+    paths:
+      - /var/lib/docker

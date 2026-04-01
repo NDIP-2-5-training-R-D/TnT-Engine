@@ -1,0 +1,178 @@
+# Default values for tnt-engine.
+# Override per environment in values-<env>.yaml.
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/geic/tnt-engine
+  tag: ""              # Set by CI/CD — defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: false
+  annotations: {}
+  # AWS IRSA:  eks.amazonaws.com/role-arn: arn:aws:iam::123456789:role/tnt-engine
+  # GCP WI:   iam.gke.io/gcp-service-account: tnt-engine@project.iam.gserviceaccount.com
+
+# ── Pod spec ─────────────────────────────────────────────────────────
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext: {}
+
+securityContext:
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# ── Service ──────────────────────────────────────────────────────────
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+# ── Ingress ──────────────────────────────────────────────────────────
+
+ingress:
+  enabled: false
+  className: nginx
+  annotations: {}
+  hosts:
+    - host: tnt-engine.internal
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# ── Probes ───────────────────────────────────────────────────────────
+
+startupProbe:
+  httpGet:
+    path: /api/v1/health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 12
+
+readinessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+
+livenessProbe:
+  httpGet:
+    path: /api/v1/health
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  timeoutSeconds: 5
+
+# ── Autoscaling ──────────────────────────────────────────────────────
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+
+# ── Pod disruption budget ────────────────────────────────────────────
+
+pdb:
+  enabled: true
+  minAvailable: 2
+
+# ── Network policy ───────────────────────────────────────────────────
+
+networkPolicy:
+  enabled: true
+
+# ── Deployment strategy ──────────────────────────────────────────────
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+# ── Anti-affinity ────────────────────────────────────────────────────
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: ["tnt-engine"]
+          topologyKey: kubernetes.io/hostname
+
+# ── Application config (injected as env vars via ConfigMap) ──────────
+
+config:
+  # PostgreSQL
+  TNT_DB_HOST: "postgres.tnt-engine.svc.cluster.local"
+  TNT_DB_PORT: "5432"
+  TNT_DB_NAME: "tnt_engine"
+  TNT_DB_POOL_MIN: "10"
+  TNT_DB_POOL_MAX: "50"
+  TNT_DB_STATEMENT_TIMEOUT_MS: "10000"
+  TNT_DB_READ_HOST: ""
+  TNT_DB_READ_PORT: "5432"
+  # Redis
+  TNT_REDIS_URL: "redis://redis.tnt-engine.svc.cluster.local:6379/0"
+  TNT_REDIS_TOKEN_TTL_SECONDS: "3600"
+  TNT_REDIS_MAX_CONNECTIONS: "50"
+  TNT_REDIS_SOCKET_TIMEOUT_SECONDS: "2.0"
+  TNT_REDIS_CONNECT_TIMEOUT_SECONDS: "3.0"
+  # L1 cache
+  TNT_L1_MAX_SIZE: "10000"
+  TNT_L1_TTL_SECONDS: "300"
+  # OpenBao crypto
+  TNT_CRYPTO_BASE_URL: "http://openbao.tnt-engine.svc.cluster.local:8200/v1"
+  TNT_CRYPTO_TRANSIT_KEY: "tnt-key"
+  TNT_CRYPTO_HMAC_KEY: "tnt-hmac"
+  TNT_CRYPTO_TIMEOUT_SECONDS: "5.0"
+  TNT_CRYPTO_MAX_RETRIES: "3"
+  # Circuit breaker
+  TNT_CB_FAILURE_THRESHOLD: "5"
+  TNT_CB_RECOVERY_TIMEOUT_SECONDS: "30.0"
+  TNT_CB_HALF_OPEN_MAX_CALLS: "3"
+  # Service
+  TNT_TOKEN_PREFIX: "tok_"
+  TNT_TOKEN_LENGTH: "32"
+  TNT_DEDUP_TTL_SECONDS: "3600"
+  # Workers
+  TNT_WORKER_CLEANUP_INTERVAL_SECONDS: "60"
+  TNT_WORKER_CLEANUP_BATCH_SIZE: "1000"
+  TNT_WORKER_REENCRYPT_BATCH_SIZE: "500"
+  TNT_WORKER_CACHE_REBUILD_BATCH_SIZE: "2000"
+
+# ── Secrets (keys only — values from GitLab CI or External Secrets) ──
+
+secrets:
+  TNT_DB_USER: ""
+  TNT_DB_PASSWORD: ""
+  TNT_CRYPTO_TOKEN: ""

@@ -1,0 +1,30 @@
+# Reusable database migration template.
+# Runs BEFORE deploy. Schema changes are idempotent (IF NOT EXISTS).
+
+.db_migrate:
+  image: postgres:16-alpine
+  variables:
+    PGCONNECT_TIMEOUT: "10"
+  script:
+    - echo "=== DB Migration (${CI_ENVIRONMENT_NAME}) ==="
+
+    # Verify connectivity
+    - |
+      PGPASSWORD="${TNT_DB_PASSWORD}" psql \
+        -h "${TNT_DB_HOST}" \
+        -p "${TNT_DB_PORT:-5432}" \
+        -U "${TNT_DB_USER}" \
+        -d "${TNT_DB_NAME}" \
+        -c "SELECT 1;" > /dev/null
+
+    # Apply schema (idempotent)
+    - |
+      PGPASSWORD="${TNT_DB_PASSWORD}" psql \
+        -h "${TNT_DB_HOST}" \
+        -p "${TNT_DB_PORT:-5432}" \
+        -U "${TNT_DB_USER}" \
+        -d "${TNT_DB_NAME}" \
+        -f sql/schema.sql \
+        --set ON_ERROR_STOP=on
+
+    - echo "=== Migration complete ==="

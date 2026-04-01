@@ -1,0 +1,50 @@
+# Helm values for Grafana Loki (log aggregation).
+#
+# Install:
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm install loki grafana/loki-stack \
+#     --namespace monitoring \
+#     --values monitoring/loki-values.yaml
+#
+# T&T Engine outputs structured JSON logs (structlog) with:
+#   - trace_id (for correlation with traces/metrics)
+#   - tenant_id (for multi-tenant filtering)
+#   - PII automatically masked (SSN, CC, email patterns)
+#
+# Query in Grafana:
+#   {namespace="tnt-engine"} | json | trace_id="abc123"
+#   {namespace="tnt-engine"} | json | level="error"
+
+loki:
+  persistence:
+    enabled: true
+    size: 50Gi
+  config:
+    auth_enabled: false
+    limits_config:
+      retention_period: 30d
+      max_query_series: 5000
+
+promtail:
+  enabled: true
+  config:
+    snippets:
+      # Parse JSON logs and extract labels
+      pipelineStages:
+        - json:
+            expressions:
+              level: level
+              trace_id: trace_id
+              tenant_id: tenant_id
+              event: event
+        - labels:
+            level:
+            trace_id:
+            tenant_id:
+        # Drop lines that somehow contain PII patterns (defense in depth)
+        - drop:
+            expression: '\d{3}-\d{2}-\d{4}'
+            drop_counter_reason: "potential_ssn"
+
+grafana:
+  enabled: false  # Use the Grafana from kube-prometheus-stack

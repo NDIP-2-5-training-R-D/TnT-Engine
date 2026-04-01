@@ -1,0 +1,38 @@
+# Dev environment overrides.
+# Minimal resources, ingress enabled, relaxed limits.
+
+replicaCount: 2
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+
+pdb:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: tnt-engine.dev.internal
+      paths:
+        - path: /
+          pathType: Prefix
+
+config:
+  TNT_DB_HOST: "postgres.tnt-engine-dev.svc.cluster.local"
+  TNT_DB_PORT: "5432"
+  TNT_DB_NAME: "tnt_engine"
+  TNT_DB_POOL_MIN: "5"
+  TNT_DB_POOL_MAX: "20"
+  TNT_REDIS_URL: "redis://redis.tnt-engine-dev.svc.cluster.local:6379/0"
+  TNT_CRYPTO_BASE_URL: "http://openbao.tnt-engine-dev.svc.cluster.local:8200/v1"
+  TNT_L1_MAX_SIZE: "1000"
+  TNT_WORKER_CLEANUP_INTERVAL_SECONDS: "120"

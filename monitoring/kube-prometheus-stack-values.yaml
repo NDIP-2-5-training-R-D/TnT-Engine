@@ -1,0 +1,138 @@
+# Helm values for kube-prometheus-stack.
+#
+# Install:
+#   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+#   helm install monitoring prometheus-community/kube-prometheus-stack \
+#     --namespace monitoring --create-namespace \
+#     --values monitoring/kube-prometheus-stack-values.yaml
+
+# ── Prometheus ───────────────────────────────────────────────────────
+
+prometheus:
+  prometheusSpec:
+    # Scrape T&T Engine ServiceMonitors from any namespace
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorNamespaceSelector: {}
+
+    # Scrape PodMonitors from any namespace
+    podMonitorSelectorNilUsesHelmValues: false
+
+    # Pick up PrometheusRules from any namespace
+    ruleSelectorNilUsesHelmValues: false
+    ruleNamespaceSelector: {}
+
+    retention: 15d
+    retentionSize: 50GB
+
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 100Gi
+
+# ── Alertmanager ─────────────────────────────────────────────────────
+
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+
+  # Alert routing — configured separately in alertmanager-config.yaml
+  # for easier management. This just enables the component.
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: "default"
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: "critical-slack"
+          match:
+            severity: critical
+          continue: true
+        - receiver: "warning-slack"
+          match:
+            severity: warning
+    receivers:
+      - name: "default"
+      - name: "critical-slack"
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+            channel: "#tnt-engine-critical"
+            send_resolved: true
+            title: '{{ .GroupLabels.alertname }}'
+            text: >-
+              {{ range .Alerts }}
+              *{{ .Annotations.summary }}*
+              {{ .Annotations.description }}
+              {{ end }}
+      - name: "warning-slack"
+        slack_configs:
+          - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+            channel: "#tnt-engine-alerts"
+            send_resolved: true
+
+# ── Grafana ──────────────────────────────────────────────────────────
+
+grafana:
+  adminUser: admin
+  adminPassword: ""  # Set via --set grafana.adminPassword=... or secret
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # Auto-provision dashboards from ConfigMaps
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+    datasources:
+      enabled: true
+
+  # Loki as additional datasource
+  additionalDataSources:
+    - name: Loki
+      type: loki
+      url: http://loki.monitoring.svc.cluster.local:3100
+      access: proxy
+      isDefault: false
+
+  persistence:
+    enabled: true
+    size: 10Gi
+
+  grafana.ini:
+    server:
+      root_url: https://grafana.internal
+    auth:
+      disable_login_form: false
+    security:
+      admin_password: ""  # Use secret
+    users:
+      auto_assign_org_role: Viewer
+
+# ── Node exporter + kube-state-metrics (enabled by default) ─────────
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true

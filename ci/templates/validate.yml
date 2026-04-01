@@ -1,0 +1,46 @@
+# Reusable validation templates for Python services.
+#
+# All Python services in the platform share this:
+#   - lint (ruff)
+#   - type check (mypy)
+#   - unit tests (pytest)
+
+.python_setup:
+  image: python:3.12-slim
+  variables:
+    PIP_CACHE_DIR: "$CI_PROJECT_DIR/.pip-cache"
+  cache:
+    key: "pip-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .pip-cache/
+  before_script:
+    - pip install --quiet -e ".[dev]"
+
+.lint:
+  extends: .python_setup
+  script:
+    - echo "=== Ruff lint ==="
+    - python -m ruff check src/ tests/
+    - echo "=== Ruff format check ==="
+    - python -m ruff format --check src/ tests/ || true
+
+.typecheck:
+  extends: .python_setup
+  script:
+    - echo "=== MyPy type check ==="
+    - python -m mypy src/ || true
+  allow_failure: true
+
+.unit_test:
+  extends: .python_setup
+  script:
+    - echo "=== Unit tests ==="
+    - python -m pytest tests/ -v --junitxml=report.xml --cov=src/ --cov-report=xml
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'

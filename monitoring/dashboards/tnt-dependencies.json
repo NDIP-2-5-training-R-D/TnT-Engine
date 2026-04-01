@@ -1,0 +1,91 @@
+{
+  "title": "T&T Engine — Dependencies",
+  "uid": "tnt-deps",
+  "timezone": "utc",
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "templating": {
+    "list": [
+      { "name": "namespace", "type": "constant", "current": { "value": "tnt-engine" } }
+    ]
+  },
+  "panels": [
+    {
+      "title": "DB Latency by Operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.99, sum(rate(tnt_db_operation_duration_seconds_bucket{namespace=\"$namespace\"}[5m])) by (le, operation))", "legendFormat": "{{ operation }} p99" }
+      ]
+    },
+    {
+      "title": "DB Errors by Operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(tnt_db_errors_total{namespace=\"$namespace\"}[5m])) by (operation)", "legendFormat": "{{ operation }}" }
+      ]
+    },
+    {
+      "title": "Redis Latency by Operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.99, sum(rate(tnt_redis_operation_duration_seconds_bucket{namespace=\"$namespace\"}[5m])) by (le, operation))", "legendFormat": "{{ operation }} p99" }
+      ]
+    },
+    {
+      "title": "Redis Errors",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(tnt_redis_errors_total{namespace=\"$namespace\"}[5m])) by (operation)", "legendFormat": "{{ operation }}" }
+      ]
+    },
+    {
+      "title": "Crypto Latency by Operation",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.99, sum(rate(tnt_crypto_operation_duration_seconds_bucket{namespace=\"$namespace\"}[5m])) by (le, operation))", "legendFormat": "{{ operation }} p99" }
+      ]
+    },
+    {
+      "title": "Crypto Errors",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "sum(rate(tnt_crypto_errors_total{namespace=\"$namespace\"}[5m])) by (operation)", "legendFormat": "{{ operation }}" }
+      ]
+    },
+    {
+      "title": "PostgreSQL — Active Connections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "pg_stat_activity_count{datname=\"tnt_engine\"}", "legendFormat": "connections" }
+      ]
+    },
+    {
+      "title": "PostgreSQL — Token Count by Status",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 24 },
+      "targets": [
+        { "expr": "tnt_token_count{}", "legendFormat": "{{ tenant_id }}/{{ status }}" }
+      ]
+    },
+    {
+      "title": "Redis — Memory Usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 24 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } },
+      "targets": [
+        { "expr": "redis_memory_used_bytes{}", "legendFormat": "used" },
+        { "expr": "redis_memory_max_bytes{}", "legendFormat": "max" }
+      ]
+    }
+  ]
+}
