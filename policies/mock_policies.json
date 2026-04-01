@@ -1,0 +1,40 @@
+{
+  "pipelines": {
+    "test-role": {
+      "role": "test-role",
+      "fields": {
+        "card_number": ["canonicalize", "hmac", "tokenize"],
+        "ssn": ["canonicalize", "hmac"],
+        "name": ["canonicalize", "mask"]
+      }
+    },
+    "default-role": {
+      "role": "default-role",
+      "fields": {
+        "email": ["canonicalize", "mask"],
+        "phone": ["canonicalize", "tokenize"]
+      }
+    }
+  },
+  "transformations": {
+    "fpe-ssn": {
+      "type": "fpe",
+      "alphabet": "numeric",
+      "tweak_source": "internal",
+      "allowed_roles": ["test-role"]
+    },
+    "token-cc": {
+      "type": "tokenization",
+      "mapping_mode": "default",
+      "convergent": false,
+      "allowed_roles": ["test-role"],
+      "store": "postgres"
+    },
+    "cc-mask": {
+      "type": "masking",
+      "template": "cc-mask",
+      "masking_character": "X",
+      "allowed_roles": ["test-role", "default-role"]
+    }
+  }
+}
