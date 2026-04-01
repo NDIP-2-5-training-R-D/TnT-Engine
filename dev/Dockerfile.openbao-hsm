@@ -1,0 +1,72 @@
+# ════════════════════════════════════════════════════════════════════
+# T&T Engine — OpenBao + SoftHSM2 Development Image
+#
+# Combines OpenBao server with SoftHSM2 PKCS#11 library in a single
+# container. Uses PKCS#11 seal for auto-unseal via HSM-stored keys.
+#
+# This image simulates production HSM-backed seal behavior using
+# SoftHSM2 as a software-based PKCS#11 provider.
+#
+# Build:
+#   docker build -f dev/Dockerfile.openbao-hsm -t tnt-openbao-hsm .
+#
+# Required volumes:
+#   /var/lib/softhsm/tokens  — SoftHSM token store (preserves keys)
+#   /opt/openbao/data        — OpenBao Raft data (preserves secrets)
+#
+# Required environment:
+#   SOFTHSM_PIN      — User PIN for HSM slot (NEVER log this)
+#   SOFTHSM_SO_PIN   — Security Officer PIN
+# ════════════════════════════════════════════════════════════════════
+
+FROM quay.io/openbao/openbao:2.1 AS openbao-base
+
+# Switch to root for package installation
+USER root
+
+# ── Install SoftHSM2 + PKCS#11 tools ───────────────────────────────
+RUN apk add --no-cache \
+        softhsm \
+        opensc \
+        gettext \
+        bash \
+        curl \
+        jq
+
+# ── SoftHSM2 configuration ─────────────────────────────────────────
+RUN mkdir -p /var/lib/softhsm/tokens /etc/softhsm && \
+    echo "directories.tokendir = /var/lib/softhsm/tokens" > /etc/softhsm/softhsm2.conf && \
+    echo "objectstore.backend = file" >> /etc/softhsm/softhsm2.conf && \
+    echo "log.level = INFO" >> /etc/softhsm/softhsm2.conf
+
+ENV SOFTHSM2_CONF=/etc/softhsm/softhsm2.conf
+
+# ── OpenBao configuration ──────────────────────────────────────────
+RUN mkdir -p /etc/openbao /opt/openbao/data
+
+COPY dev/bao_dev.hcl.tpl /etc/openbao/bao_dev.hcl.tpl
+COPY dev/entrypoint.sh   /usr/local/bin/entrypoint.sh
+
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# ── Volumes ─────────────────────────────────────────────────────────
+# These MUST be mounted to persist data across container restarts:
+#   - SoftHSM tokens contain the PKCS#11 seal key (Master Key wrapper)
+#   - OpenBao data contains the encrypted secrets and configuration
+VOLUME ["/var/lib/softhsm/tokens", "/opt/openbao/data"]
+
+# ── Capabilities ────────────────────────────────────────────────────
+# IPC_LOCK is required for disable_mlock = false (memory locking)
+# Must be granted via docker compose cap_add or --cap-add
+
+EXPOSE 8200 8201
+
+# ── Health check ────────────────────────────────────────────────────
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=5 \
+    CMD curl -sf http://127.0.0.1:8200/v1/sys/health || exit 1
+
+# ── Entrypoint ──────────────────────────────────────────────────────
+# Runs as root because SoftHSM needs write access to /var/lib/softhsm/tokens
+# and OpenBao needs IPC_LOCK capability.
+# In production, use a dedicated HSM appliance instead.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

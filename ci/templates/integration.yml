@@ -1,0 +1,47 @@
+# Integration test template — runs against real Postgres/Redis/OpenBao.
+# Uses GitLab CI services to spin up infrastructure containers.
+
+.integration_test:
+  image: python:3.12-slim
+  services:
+    - name: postgres:16-alpine
+      alias: postgres
+      variables:
+        POSTGRES_DB: tnt_engine_test
+        POSTGRES_USER: tnt_test
+        POSTGRES_PASSWORD: tnt_test_secret
+    - name: redis:7-alpine
+      alias: redis
+    - name: quay.io/openbao/openbao:latest
+      alias: openbao
+      variables:
+        BAO_DEV_ROOT_TOKEN_ID: test-token
+        BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      command: ["server", "-dev"]
+  variables:
+    TNT_DB_HOST: postgres
+    TNT_DB_PORT: "5432"
+    TNT_DB_NAME: tnt_engine_test
+    TNT_DB_USER: tnt_test
+    TNT_DB_PASSWORD: tnt_test_secret
+    TNT_REDIS_URL: "redis://redis:6379/0"
+    TNT_CRYPTO_BASE_URL: "http://openbao:8200/v1"
+    TNT_CRYPTO_TOKEN: "test-token"
+    TNT_VAULT_AUTH_METHOD: "static"
+    TNT_CRYPTO_BACKEND: "openbao"
+    TNT_ENVIRONMENT: "development"
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq postgresql-client > /dev/null
+    - pip install --quiet -e ".[dev]"
+    # Wait for services
+    - |
+      for i in $(seq 1 30); do
+        pg_isready -h postgres -U tnt_test && break || sleep 2
+      done
+    - PGPASSWORD=tnt_test_secret psql -h postgres -U tnt_test -d tnt_engine_test -f sql/schema.sql
+  script:
+    - python -m pytest tests/integration/ -v -m integration --junitxml=integration-report.xml --timeout=60
+  artifacts:
+    when: always
+    reports:
+      junit: integration-report.xml

@@ -175,17 +175,42 @@ async def health(request: Request) -> dict:
     """Full health check — includes dependency status. Used by liveness probe."""
     cb = request.app.state.circuit_breaker
     cache = request.app.state.layered_cache
-    return {
+
+    result: dict = {
         "status": "ok",
         "circuit_breaker": cb.state,
         "l1_cache_size": cache.l1_size,
     }
 
+    # OpenBao health (if checker is configured)
+    vault_checker = getattr(request.app.state, "vault_health_checker", None)
+    if vault_checker:
+        vault_health = await vault_checker.check()
+        result["vault"] = {
+            "status": vault_health.status.value,
+            "initialized": vault_health.initialized,
+            "sealed": vault_health.sealed,
+            "version": vault_health.version,
+        }
+        if not vault_health.is_operational:
+            result["status"] = "degraded"
+
+    return result
+
 
 @router.get("/ready")
 async def ready(request: Request) -> dict:
-    """Readiness probe — lightweight check that the service can accept traffic.
-    Returns 200 if the app is initialized. Does NOT check dependencies
-    (DB/Redis/crypto) — those have their own circuit breakers and graceful degradation.
+    """Readiness probe — checks that the service can accept traffic.
+
+    Returns 503 if OpenBao is sealed or unreachable (crypto operations would fail).
     """
+    vault_checker = getattr(request.app.state, "vault_health_checker", None)
+    if vault_checker:
+        vault_health = await vault_checker.check()
+        if not vault_health.is_operational:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=503,
+                content={"ready": False, "reason": f"vault_{vault_health.status.value}"},
+            )
     return {"ready": True}

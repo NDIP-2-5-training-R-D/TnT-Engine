@@ -83,3 +83,69 @@ class DatabaseError(TNTError):
             f"Database operation failed: {operation}",
             details={"operation": operation, "cause": cause},
         )
+
+
+class VaultAuthError(TNTError):
+    """Failed to authenticate to OpenBao/Vault."""
+
+    code = "VAULT_AUTH_FAILED"
+
+    def __init__(self, method: str, cause: str = "") -> None:
+        super().__init__(
+            f"Vault authentication failed: {method}",
+            details={"method": method, "cause": cause},
+        )
+
+
+class VaultTokenExpiredError(TNTError):
+    """OpenBao/Vault token has expired and renewal failed."""
+
+    code = "VAULT_TOKEN_EXPIRED"
+
+    def __init__(self) -> None:
+        super().__init__("Vault token has expired and could not be renewed")
+
+
+class EnvironmentSafetyError(TNTError):
+    """Raised when a configuration violates environment safety rules."""
+
+    code = "ENVIRONMENT_SAFETY_VIOLATION"
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class HSMError(TNTError):
+    """Base error for HSM/PKCS#11 operations."""
+
+    code = "HSM_ERROR"
+
+    def __init__(self, operation: str, cause: str = "") -> None:
+        super().__init__(
+            f"HSM operation failed: {operation}",
+            details={"operation": operation, "cause": cause},
+        )
+
+
+class HSMSessionError(HSMError):
+    """Failed to open or maintain a PKCS#11 session."""
+
+    code = "HSM_SESSION_ERROR"
+
+
+class HSMKeyNotFoundError(HSMError):
+    """Requested key label not found in HSM slot."""
+
+    code = "HSM_KEY_NOT_FOUND"
+
+    def __init__(self, label: str) -> None:
+        super().__init__("key_lookup", cause=f"Key label not found: {label}")
+
+
+class HSMAuthenticationError(HSMError):
+    """PIN authentication to HSM slot failed."""
+
+    code = "HSM_AUTH_FAILED"
+
+    def __init__(self) -> None:
+        super().__init__("authenticate", cause="HSM PIN authentication failed")

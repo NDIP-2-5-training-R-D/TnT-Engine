@@ -43,5 +43,41 @@ config:
   TNT_REDIS_URL: "redis://redis.tnt-engine-prod.svc.cluster.local:6379/0"
   TNT_REDIS_MAX_CONNECTIONS: "100"
   TNT_CRYPTO_BASE_URL: "http://openbao.tnt-engine-prod.svc.cluster.local:8200/v1"
+  TNT_CRYPTO_BACKEND: "openbao"
+  TNT_VAULT_AUTH_METHOD: "kubernetes"
+  TNT_VAULT_K8S_ROLE: "tnt-engine"
+  TNT_ENVIRONMENT: "production"
+  # TLS for internal services
+  TNT_DB_SSL_MODE: "verify-full"
+  TNT_DB_SSL_CA_CERT: "/etc/tnt/certs/db-ca.crt"
+  TNT_REDIS_SSL: "true"
+  TNT_REDIS_CA_CERT: "/etc/tnt/certs/redis-ca.crt"
+  TNT_CRYPTO_VERIFY_SSL: "true"
+  TNT_CRYPTO_CA_CERT: "/etc/tnt/certs/vault-ca.crt"
   TNT_L1_MAX_SIZE: "50000"
   TNT_L1_TTL_SECONDS: "600"
+
+tlsCerts:
+  enabled: true
+  secretName: "tnt-engine-tls-certs"
+
+# External Secrets — pull from OpenBao in production
+externalSecrets:
+  enabled: true
+  refreshInterval: "30m"
+  secretStoreRef:
+    name: "openbao-cluster-store"
+    kind: "ClusterSecretStore"
+  data:
+    - secretKey: TNT_DB_USER
+      remoteKey: secret/data/tnt-engine/db
+      property: username
+    - secretKey: TNT_DB_PASSWORD
+      remoteKey: secret/data/tnt-engine/db
+      property: password
+    - secretKey: TNT_VAULT_APPROLE_ROLE_ID
+      remoteKey: secret/data/tnt-engine/auth
+      property: role_id
+    - secretKey: TNT_VAULT_APPROLE_SECRET_ID
+      remoteKey: secret/data/tnt-engine/auth
+      property: secret_id

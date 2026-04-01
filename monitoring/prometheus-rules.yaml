@@ -118,3 +118,49 @@ spec:
             team: platform
           annotations:
             summary: "T&T Engine has less than 50% pods available"
+
+        # ── Vault sealed ─────────────────────────────────────────
+        - alert: TNTVaultSealed
+          expr: |
+            tnt_vault_health_sealed == 1
+          for: 1m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "OpenBao/Vault is SEALED — all crypto operations will fail"
+            runbook_url: "docs/runbooks/vault-sealed-recovery.md"
+
+        # ── Vault token renewal failures ─────────────────────────
+        - alert: TNTVaultTokenRenewalFailure
+          expr: |
+            increase(tnt_vault_token_renewals_total{status="failure"}[10m]) > 3
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Vault token renewal failing — token may expire soon"
+
+        # ── Audit DLQ backlog ────────────────────────────────────
+        - alert: TNTAuditDLQBacklog
+          expr: |
+            tnt_audit_dlq_file_size_bytes > 1048576
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Audit DLQ file exceeds 1MB — entries not being delivered to DB"
+
+        # ── HSM failures ─────────────────────────────────────────
+        - alert: TNTHSMFailures
+          expr: |
+            increase(tnt_crypto_errors_total[5m]) > 5
+            and on() tnt_vault_health_sealed == 0
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Crypto backend failures while Vault is healthy — possible HSM issue"

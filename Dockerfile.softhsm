@@ -1,0 +1,47 @@
+# SoftHSM2 container for local PKCS#11 HSM development and testing.
+#
+# Provides:
+#   - SoftHSM2 library at /usr/lib/softhsm/libsofthsm2.so
+#   - Pre-initialized slot 0 with AES-256 and HMAC keys
+#   - Token storage at /var/lib/softhsm/tokens (volume-mountable)
+#
+# Usage:
+#   docker compose up softhsm
+#   # Then configure T&T Engine:
+#   #   TNT_CRYPTO_BACKEND=hsm
+#   #   TNT_HSM_PKCS11_LIBRARY=/usr/lib/softhsm/libsofthsm2.so
+#   #   TNT_HSM_SLOT=0
+#   #   TNT_HSM_PIN=1234
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        softhsm2 \
+        opensc \
+        libengine-pkcs11-openssl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Configure SoftHSM
+RUN mkdir -p /var/lib/softhsm/tokens /etc/softhsm && \
+    echo "directories.tokendir = /var/lib/softhsm/tokens" > /etc/softhsm/softhsm2.conf && \
+    echo "objectstore.backend = file" >> /etc/softhsm/softhsm2.conf && \
+    echo "log.level = INFO" >> /etc/softhsm/softhsm2.conf
+
+# Initialize slot and create keys for T&T Engine
+# Slot 0: label="tnt-hsm", PIN=1234, SO-PIN=admin1234
+# Note: pkcs11-tool on bookworm does not support --usage-encrypt/--usage-sign.
+# Use --extractable --allow-sw instead.
+RUN softhsm2-util --init-token --slot 0 --label "tnt-hsm" \
+        --pin 1234 --so-pin admin1234 && \
+    pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
+        --login --pin 1234 --token-label "tnt-hsm" \
+        --keygen --key-type AES:32 --label "tnt-encrypt-key" \
+        --id 01 --extractable --allow-sw && \
+    pkcs11-tool --module /usr/lib/softhsm/libsofthsm2.so \
+        --login --pin 1234 --token-label "tnt-hsm" \
+        --keygen --key-type GENERIC:32 --label "tnt-hmac-key" \
+        --id 02 --extractable --allow-sw
+
+# Keep container alive (keys persist in mounted volume)
+CMD ["tail", "-f", "/dev/null"]

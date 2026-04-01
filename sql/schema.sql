@@ -114,20 +114,30 @@ CREATE OR REPLACE FUNCTION upsert_token(
 DECLARE
     v_existing_token TEXT;
 BEGIN
-    -- Attempt insert into lookup (the contention point).
+    -- Insert token_store FIRST (parent table for FK)
+    BEGIN
+        INSERT INTO token_store (token, value_encrypted, transformation, key_version, tenant_id, expires_at)
+        VALUES (p_token, p_value_encrypted, p_transformation, p_key_version, p_tenant_id, p_expires_at);
+    EXCEPTION WHEN unique_violation THEN
+        -- token already exists (rare race) — ignore
+        NULL;
+    END;
+
+    -- Then attempt insert into lookup (the convergent contention point)
     INSERT INTO token_lookup (hash, tenant_id, token)
     VALUES (p_hash, p_tenant_id, p_token)
     ON CONFLICT (hash, tenant_id) DO NOTHING;
 
     IF FOUND THEN
-        -- We won the race — insert the token_store row.
-        INSERT INTO token_store (token, value_encrypted, transformation, key_version, tenant_id, expires_at)
-        VALUES (p_token, p_value_encrypted, p_transformation, p_key_version, p_tenant_id, p_expires_at);
+        -- We won the race
         RETURN p_token;
     ELSE
-        -- Another transaction won — return the existing token.
+        -- Another transaction won — return the existing token, clean up our token_store row
         SELECT token INTO v_existing_token
         FROM token_lookup WHERE hash = p_hash AND tenant_id = p_tenant_id;
+        IF v_existing_token != p_token THEN
+            DELETE FROM token_store WHERE token = p_token;
+        END IF;
         RETURN v_existing_token;
     END IF;
 END;

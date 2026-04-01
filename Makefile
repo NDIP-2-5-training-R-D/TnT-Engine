@@ -11,14 +11,48 @@ help: ## Show this help
 
 # ── Development ──────────────────────────────────────────────────────
 
-dev: ## Start local dev environment (postgres + redis + openbao)
-	docker compose up -d
+dev: ## Start full local dev (postgres + redis + openbao + tnt-engine app)
+	docker compose up -d --build
+	bash scripts/init-openbao-dev.sh
 
 dev-down: ## Stop local dev environment
 	docker compose down
 
-test: ## Run all tests
-	python3 -m pytest tests/ -v
+dev-hsm: ## Start local dev with OpenBao + SoftHSM2 PKCS#11 seal
+	@test -f dev/.env || (echo "ERROR: dev/.env not found. Run: cp dev/.env.example dev/.env" && exit 1)
+	docker compose -f dev/docker-compose.dev.yml up --build -d
+
+dev-hsm-down: ## Stop OpenBao + SoftHSM2 dev environment
+	docker compose -f dev/docker-compose.dev.yml down
+
+dev-hsm-init: ## Initialize OpenBao after first start (creates transit keys)
+	@echo "Initializing OpenBao (first time only)..."
+	docker exec tnt-openbao-hsm bao operator init -key-shares=1 -key-threshold=1 2>&1 | tee dev/.init-output
+	@echo ""
+	@echo "IMPORTANT: Save the Recovery Key and Root Token from above!"
+	@echo "Then run: make dev-hsm-transit ROOT_TOKEN=<token>"
+
+dev-hsm-transit: ## Enable transit engine and create T&T keys (ROOT_TOKEN required)
+	@test -n "$(ROOT_TOKEN)" || (echo "Usage: make dev-hsm-transit ROOT_TOKEN=<root-token>" && exit 1)
+	docker exec -e VAULT_TOKEN=$(ROOT_TOKEN) tnt-openbao-hsm bao secrets enable transit || true
+	docker exec -e VAULT_TOKEN=$(ROOT_TOKEN) tnt-openbao-hsm bao write -f transit/keys/tnt-key
+	docker exec -e VAULT_TOKEN=$(ROOT_TOKEN) tnt-openbao-hsm bao write -f transit/keys/tnt-hmac
+	@echo "Transit engine ready. Keys: tnt-key, tnt-hmac"
+
+dev-hsm-status: ## Show OpenBao seal status and PKCS#11 info
+	docker exec tnt-openbao-hsm bao status || true
+	@echo ""
+	docker exec tnt-openbao-hsm softhsm2-util --show-slots 2>/dev/null | head -20
+
+test: ## Run unit tests (excludes integration)
+	python3 -m pytest tests/ -v --ignore=tests/integration -m "not integration"
+
+integration-test: ## Run integration tests (requires docker-compose services)
+	docker compose -f tests/integration/docker-compose.yml up -d --wait
+	python3 -m pytest tests/integration/ -v -m integration --timeout=60; \
+	EXIT_CODE=$$?; \
+	docker compose -f tests/integration/docker-compose.yml down; \
+	exit $$EXIT_CODE
 
 lint: ## Run linter
 	python3 -m ruff check src/ tests/
@@ -70,6 +104,12 @@ migrate: ## Run database migration (ENV=dev|staging|prod)
 
 backup: ## Backup database
 	bash scripts/db-backup.sh
+
+vault-backup: ## Backup OpenBao raft storage
+	bash scripts/vault-backup.sh
+
+vault-restore: ## Restore OpenBao from raft snapshot (SNAPSHOT=/path/to/file)
+	bash scripts/vault-restore.sh $(SNAPSHOT)
 
 # ── Monitoring ───────────────────────────────────────────────────────
 

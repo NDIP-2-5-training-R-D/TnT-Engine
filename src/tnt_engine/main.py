@@ -16,7 +16,8 @@ from tnt_engine.cache.layered import LayeredCache
 from tnt_engine.cache.redis import TokenCache
 from tnt_engine.config import Settings, settings
 from tnt_engine.crypto.circuit_breaker import CircuitBreakerBackend
-from tnt_engine.crypto.openbao import OpenBaoCryptoBackend
+from tnt_engine.crypto.factory import create_crypto_backend
+from tnt_engine.crypto.vault_health import VaultHealthChecker
 from tnt_engine.db.connection import Database
 from tnt_engine.db.repository import TokenRepository
 from tnt_engine.events.bus import EventBus
@@ -29,6 +30,7 @@ from tnt_engine.runtime.dynamic_config import DynamicConfig
 from tnt_engine.runtime.feature_flags import FeatureFlags
 from tnt_engine.security.quota import QuotaManager
 from tnt_engine.security.rate_limiter import RateLimiter
+from tnt_engine.service.audit_writer import ReliableAuditWriter
 from tnt_engine.service.policy import PolicyEngine
 from tnt_engine.service.token_service import TokenService
 from tnt_engine.workers.cache_rebuild import CacheRebuildWorker
@@ -47,7 +49,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     l2_cache = TokenCache(cfg)
     layered_cache = LayeredCache(l2_cache, cfg)
 
-    raw_backend = OpenBaoCryptoBackend(cfg)
+    raw_backend = await create_crypto_backend(cfg)
+    # Expose token manager for admin status (if OpenBao backend with managed tokens)
+    _token_manager = getattr(raw_backend, "_token_manager", None)
+
     cb_backend = CircuitBreakerBackend(
         raw_backend,
         failure_threshold=cfg.cb_failure_threshold,
@@ -56,12 +61,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     repo = TokenRepository(db)
+
+    # ── Reliable Audit Writer ────────────────────────────────────
+    audit_writer = ReliableAuditWriter(repo, cfg)
+    await audit_writer.start()
+
     svc = TokenService(
         hmac=cb_backend,
         encryption=cb_backend,
         repo=repo,
         cache=layered_cache,
         settings=cfg,
+        audit_writer=audit_writer,
     )
 
     # ── Governance + Security ────────────────────────────────────
@@ -110,12 +121,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.shutdown = shutdown
     app.state.cleanup_worker = cleanup_worker
     app.state.cache_rebuild_worker = cache_rebuild_worker
+    app.state.vault_token_manager = _token_manager
+    app.state.audit_writer = audit_writer
+
+    # OpenBao health checker (for /health and /ready endpoints)
+    vault_health_checker = VaultHealthChecker(cfg.crypto_base_url, settings=cfg)
+    app.state.vault_health_checker = vault_health_checker
 
     yield
 
     # ── Graceful shutdown ────────────────────────────────────────
     await shutdown.initiate()
+    await audit_writer.stop()  # Drain audit buffer before closing DB
     await cleanup_worker.stop()
+    await vault_health_checker.close()
     await cb_backend.close()
     await layered_cache.close()
     await db.close()

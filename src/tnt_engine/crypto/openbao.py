@@ -1,9 +1,18 @@
-"""OpenBao (Vault-compatible) transit engine client with latency instrumentation."""
+"""OpenBao (Vault-compatible) transit engine client with latency instrumentation.
+
+Supports two modes of token management:
+  - Legacy: static token from Settings (when no VaultTokenManager provided)
+  - Managed: dynamic token from VaultTokenManager (auto-renewed)
+
+The managed mode is preferred for production. The legacy mode exists
+for backward compatibility and development.
+"""
 
 from __future__ import annotations
 
 import base64
 import time
+from typing import TYPE_CHECKING
 
 import httpx
 from tenacity import (
@@ -19,21 +28,37 @@ from tnt_engine.errors import EncryptionError
 from tnt_engine.logging import get_logger
 from tnt_engine.metrics import CRYPTO_ERRORS, CRYPTO_LATENCY
 
+if TYPE_CHECKING:
+    from tnt_engine.crypto.vault_auth import VaultTokenManager
+
 logger = get_logger(__name__)
 
 
 class OpenBaoCryptoBackend(CryptoBackend):
     """Production implementation backed by OpenBao Transit engine."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        token_manager: VaultTokenManager | None = None,
+    ) -> None:
         self._base = settings.crypto_base_url.rstrip("/")
         self._transit_key = settings.crypto_transit_key
         self._hmac_key = settings.crypto_hmac_key
         self._max_retries = settings.crypto_max_retries
-        self._client = httpx.AsyncClient(
-            headers={"X-Vault-Token": settings.crypto_token},
-            timeout=httpx.Timeout(settings.crypto_timeout_seconds),
-        )
+        self._token_manager = token_manager
+
+        # Legacy static token mode (when no token_manager provided)
+        self._static_token = settings.crypto_token if token_manager is None else None
+
+        from tnt_engine.crypto._http import build_httpx_client
+        self._client = build_httpx_client(settings)
+
+    def _get_token(self) -> str:
+        """Get the current valid token (managed or static)."""
+        if self._token_manager is not None:
+            return self._token_manager.token
+        return self._static_token or ""
 
     # ── HMACService ──────────────────────────────────────────────────
 
@@ -90,6 +115,8 @@ class OpenBaoCryptoBackend(CryptoBackend):
 
     async def close(self) -> None:
         await self._client.aclose()
+        if self._token_manager is not None:
+            await self._token_manager.stop()
 
     # ── Internals ────────────────────────────────────────────────────
 
@@ -101,7 +128,8 @@ class OpenBaoCryptoBackend(CryptoBackend):
     )
     async def _post(self, path: str, json: dict) -> dict:
         url = f"{self._base}{path}"
-        resp = await self._client.post(url, json=json)
+        headers = {"X-Vault-Token": self._get_token()}
+        resp = await self._client.post(url, json=json, headers=headers)
         resp.raise_for_status()
         body = resp.json()
         return body.get("data", body)

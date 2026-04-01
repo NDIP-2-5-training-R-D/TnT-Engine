@@ -83,6 +83,59 @@ CRYPTO_ERRORS = Counter(
     ["operation"],
 )
 
+# ── Vault token metrics ──────────────────────────────────────────────
+
+VAULT_TOKEN_TTL = Gauge(
+    "tnt_vault_token_ttl_seconds",
+    "Remaining TTL of the current Vault token",
+)
+VAULT_TOKEN_RENEWALS = Counter(
+    "tnt_vault_token_renewals_total",
+    "Vault token renewal attempts",
+    ["status"],  # "success" or "failure"
+)
+VAULT_AUTH_ERRORS = Counter(
+    "tnt_vault_auth_errors_total",
+    "Vault authentication errors",
+    ["method"],  # "approle", "kubernetes", "renew"
+)
+VAULT_HEALTH_SEALED = Gauge(
+    "tnt_vault_health_sealed",
+    "1 if OpenBao/Vault is sealed, 0 if healthy",
+)
+
+# ── Audit metrics ────────────────────────────────────────────────────
+
+AUDIT_BUFFER_SIZE = Gauge(
+    "tnt_audit_buffer_size",
+    "Current number of audit entries buffered in memory",
+)
+AUDIT_FLUSH_TOTAL = Counter(
+    "tnt_audit_flush_total",
+    "Audit buffer flush attempts",
+    ["status"],  # "success", "failure"
+)
+AUDIT_ENTRIES_WRITTEN = Counter(
+    "tnt_audit_entries_written_total",
+    "Audit entries successfully written to DB",
+)
+AUDIT_ENTRIES_DLQ = Counter(
+    "tnt_audit_entries_dlq_total",
+    "Audit entries sent to dead letter queue",
+)
+AUDIT_DLQ_SIZE = Gauge(
+    "tnt_audit_dlq_file_size_bytes",
+    "Size of the audit dead letter queue file on disk",
+)
+
+# ── Reencrypt worker metrics ─────────────────────────────────────────
+
+REENCRYPT_PLAINTEXT_EXPOSURE = Histogram(
+    "tnt_reencrypt_plaintext_exposure_seconds",
+    "Duration plaintext is held in memory during re-encryption",
+    buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5),
+)
+
 # ── Service-level metrics (already exist in token_service.py) ────────
 # These are re-exported references for dashboard consistency.
 # The actual Counter/Histogram objects are defined in token_service.py

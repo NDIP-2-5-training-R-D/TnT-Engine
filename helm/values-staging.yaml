@@ -17,3 +17,22 @@ config:
   TNT_DB_NAME: "tnt_engine"
   TNT_REDIS_URL: "redis://redis.tnt-engine-staging.svc.cluster.local:6379/0"
   TNT_CRYPTO_BASE_URL: "http://openbao.tnt-engine-staging.svc.cluster.local:8200/v1"
+  TNT_CRYPTO_BACKEND: "openbao"
+  TNT_VAULT_AUTH_METHOD: "kubernetes"
+  TNT_VAULT_K8S_ROLE: "tnt-engine"
+  TNT_ENVIRONMENT: "staging"
+
+# External Secrets for staging
+externalSecrets:
+  enabled: true
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: "openbao-cluster-store"
+    kind: "ClusterSecretStore"
+  data:
+    - secretKey: TNT_DB_USER
+      remoteKey: secret/data/tnt-engine/db
+      property: username
+    - secretKey: TNT_DB_PASSWORD
+      remoteKey: secret/data/tnt-engine/db
+      property: password

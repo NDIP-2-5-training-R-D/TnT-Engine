@@ -176,3 +176,32 @@ secrets:
   TNT_DB_USER: ""
   TNT_DB_PASSWORD: ""
   TNT_CRYPTO_TOKEN: ""
+
+# ── External Secrets Operator (recommended for staging/production) ───
+# When enabled, secrets are pulled from OpenBao/Vault at runtime
+# via the External Secrets Operator CRD. Static secrets.yaml is disabled.
+
+# ── TLS Certificates (mount CA certs into pod) ──────────────────────
+
+tlsCerts:
+  enabled: false
+  secretName: "tnt-engine-tls-certs"
+
+# ── External Secrets Operator (recommended for staging/production) ───
+  enabled: false
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: "openbao-cluster-store"
+    kind: "ClusterSecretStore"
+  data: []
+  # Example:
+  # data:
+  #   - secretKey: TNT_DB_USER
+  #     remoteKey: secret/data/tnt-engine/db
+  #     property: username
+  #   - secretKey: TNT_DB_PASSWORD
+  #     remoteKey: secret/data/tnt-engine/db
+  #     property: password
+  #   - secretKey: TNT_CRYPTO_TOKEN
+  #     remoteKey: secret/data/tnt-engine/crypto
+  #     property: token

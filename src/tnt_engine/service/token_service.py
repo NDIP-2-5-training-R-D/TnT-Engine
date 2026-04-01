@@ -29,10 +29,15 @@ from datetime import datetime, timedelta, timezone
 
 from prometheus_client import Counter, Histogram
 
+from typing import TYPE_CHECKING
+
 from tnt_engine.cache.layered import LayeredCache
 from tnt_engine.config import Settings
 from tnt_engine.crypto.interface import EncryptionService, HMACService
 from tnt_engine.db.repository import TokenRepository
+
+if TYPE_CHECKING:
+    from tnt_engine.service.audit_writer import ReliableAuditWriter
 from tnt_engine.errors import (
     InvalidTokenFormatError,
     TokenExpiredError,
@@ -81,6 +86,7 @@ class TokenService:
         repo: TokenRepository,
         cache: LayeredCache,
         settings: Settings,
+        audit_writer: ReliableAuditWriter | None = None,
     ) -> None:
         self._hmac = hmac
         self._encryption = encryption
@@ -89,6 +95,7 @@ class TokenService:
         self._prefix = settings.token_prefix
         self._token_bytes = settings.token_length
         self._dedup_ttl = settings.dedup_ttl_seconds
+        self._audit_writer = audit_writer
 
     # ------------------------------------------------------------------
     # Tokenize (single)
@@ -382,20 +389,22 @@ class TokenService:
     def _fire_audit(
         self, action: AuditAction, field: str | None, tenant_id: str, **extra: object
     ) -> None:
-        asyncio.create_task(self._write_audit(action, field, tenant_id, **extra))
+        entry = AuditEntry(
+            action=action,
+            field=field,
+            tenant_id=tenant_id,
+            trace_id=get_trace_id(),
+            metadata=extra,
+        )
+        if self._audit_writer is not None:
+            self._audit_writer.enqueue(entry)
+        else:
+            # Legacy fire-and-forget fallback
+            asyncio.create_task(self._write_audit_legacy(entry))
 
-    async def _write_audit(
-        self, action: AuditAction, field: str | None, tenant_id: str, **extra: object
-    ) -> None:
+    async def _write_audit_legacy(self, entry: AuditEntry) -> None:
+        """Legacy direct-write path. Used when no ReliableAuditWriter is configured."""
         try:
-            await self._repo.write_audit(
-                AuditEntry(
-                    action=action,
-                    field=field,
-                    tenant_id=tenant_id,
-                    trace_id=get_trace_id(),
-                    metadata=extra,
-                )
-            )
+            await self._repo.write_audit(entry)
         except Exception:
-            logger.warning("audit_write_failed", action=action.value)
+            logger.warning("audit_write_failed", action=entry.action.value)

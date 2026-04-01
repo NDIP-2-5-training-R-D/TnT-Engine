@@ -10,12 +10,22 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tnt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   openbao:
     image: quay.io/openbao/openbao:latest
@@ -27,6 +37,58 @@ services:
     ports:
       - "8200:8200"
     command: server -dev
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # T&T Engine — the Python app itself
+  tnt-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      TNT_DB_HOST: postgres
+      TNT_DB_PORT: "5432"
+      TNT_DB_NAME: tnt_engine
+      TNT_DB_USER: tnt
+      TNT_DB_PASSWORD: tnt_secret
+      TNT_REDIS_URL: "redis://redis:6379/0"
+      TNT_CRYPTO_BASE_URL: "http://openbao:8200/v1"
+      TNT_CRYPTO_TOKEN: "dev-token"
+      TNT_VAULT_AUTH_METHOD: "static"
+      TNT_CRYPTO_BACKEND: "openbao"
+      TNT_CRYPTO_VERIFY_SSL: "false"
+      TNT_ENVIRONMENT: "development"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      openbao:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # SoftHSM2 — only starts with: docker compose --profile hsm up
+  softhsm:
+    profiles: ["hsm"]
+    build:
+      context: .
+      dockerfile: Dockerfile.softhsm
+    volumes:
+      - softhsm-tokens:/var/lib/softhsm/tokens
+    environment:
+      SOFTHSM2_CONF: /etc/softhsm/softhsm2.conf
 
 volumes:
   pgdata:
+  softhsm-tokens:

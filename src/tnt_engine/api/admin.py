@@ -104,12 +104,23 @@ async def system_status(request: Request) -> dict:
     cfg = request.app.state.dynamic_config
     events = request.app.state.event_bus
 
+    vault_status = {}
+    token_manager = getattr(request.app.state, "vault_token_manager", None)
+    if token_manager and token_manager.token_info:
+        vault_status = {
+            "auth_method": getattr(token_manager, "_provider", None)
+            and token_manager._provider.method_name or "unknown",
+            "token_ttl_remaining": round(token_manager.token_info.remaining_ttl, 1),
+            "renewable": token_manager.token_info.renewable,
+        }
+
     return {
         "circuit_breaker": cb.state,
         "l1_cache_size": cache.l1_size,
         "feature_flags": flags.get_all(),
         "dynamic_config": cfg.to_dict(),
         "event_subscriptions": events.subscriptions,
+        "vault_token": vault_status,
     }
 
 
@@ -130,3 +141,105 @@ async def reset_rate_limit(tenant_id: str, request: Request) -> dict:
     """Reset rate limit counters for a tenant."""
     request.app.state.rate_limiter.reset(tenant_id)
     return {"status": "reset", "tenant_id": tenant_id}
+
+
+# ── Audit Writer ─────────────────────────────────────────────────────
+
+@admin_router.get("/audit/status")
+async def audit_status(request: Request) -> dict:
+    """Get audit writer status: buffer size, DLQ size."""
+    writer = getattr(request.app.state, "audit_writer", None)
+    if not writer:
+        return {"status": "not_configured"}
+    return {
+        "buffer_size": writer.buffer_size,
+        "dlq_size_bytes": writer.dlq_size_bytes,
+    }
+
+
+@admin_router.post("/audit/flush")
+async def audit_flush(request: Request) -> dict:
+    """Force an immediate audit buffer flush."""
+    writer = getattr(request.app.state, "audit_writer", None)
+    if not writer:
+        raise HTTPException(status_code=404, detail="Audit writer not configured")
+    count = await writer.flush_now()
+    return {"status": "flushed", "entries_written": count}
+
+
+@admin_router.post("/audit/dlq/replay")
+async def audit_dlq_replay(request: Request) -> dict:
+    """Replay dead letter queue entries back to the database."""
+    writer = getattr(request.app.state, "audit_writer", None)
+    if not writer:
+        raise HTTPException(status_code=404, detail="Audit writer not configured")
+    count = await writer.replay_dlq()
+    return {"status": "replayed", "entries_recovered": count}
+
+
+class AuditQueryParams(BaseModel):
+    tenant_id: str = ""
+    action: str | None = None
+    field: str | None = None
+    since: str | None = None
+    limit: int = 50
+
+
+@admin_router.post("/audit/query")
+async def audit_query(body: AuditQueryParams, request: Request) -> dict:
+    """Query audit log entries with filters."""
+    from datetime import datetime, timezone
+
+    repo = getattr(request.app.state, "db", None)
+    if not repo:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from tnt_engine.db.repository import TokenRepository
+    token_repo = TokenRepository(repo)
+
+    since_dt = None
+    if body.since:
+        try:
+            since_dt = datetime.fromisoformat(body.since.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid since format (use ISO 8601)")
+
+    # If no tenant filter, query all entries directly
+    if not body.tenant_id:
+        conditions = []
+        params: list = []
+        idx = 1
+        if body.action:
+            conditions.append(f"action = ${idx}")
+            params.append(body.action)
+            idx += 1
+        if body.field:
+            conditions.append(f"field = ${idx}")
+            params.append(body.field)
+            idx += 1
+        if since_dt:
+            conditions.append(f"performed_at >= ${idx}")
+            params.append(since_dt)
+            idx += 1
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = await repo.read_pool.fetch(
+            f"SELECT * FROM audit_log {where} ORDER BY performed_at DESC LIMIT ${idx}",
+            *params, min(body.limit, 500),
+        )
+        entries = [dict(r) for r in rows]
+    else:
+        entries = await token_repo.query_audit(
+            tenant_id=body.tenant_id,
+            action=body.action,
+            field=body.field,
+            since=since_dt,
+            limit=min(body.limit, 500),
+        )
+
+    # Serialize datetime fields
+    for e in entries:
+        for k, v in e.items():
+            if hasattr(v, "isoformat"):
+                e[k] = v.isoformat()
+
+    return {"entries": entries, "count": len(entries)}

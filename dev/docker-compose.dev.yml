@@ -1,0 +1,114 @@
+# ════════════════════════════════════════════════════════════════════
+# T&T Engine — Local Development Stack
+#
+# Full environment with PKCS#11-sealed OpenBao + SoftHSM2:
+#   - PostgreSQL 16      (port 5432)
+#   - Redis 7            (port 6379)
+#   - OpenBao + SoftHSM2 (port 8200) — PKCS#11 seal, auto-unseal
+#
+# Usage:
+#   cd dev/
+#   docker compose -f docker-compose.dev.yml up --build -d
+#
+# First run:
+#   After containers start, initialize and unseal OpenBao:
+#     docker exec tnt-openbao-hsm bao operator init \
+#       -key-shares=1 -key-threshold=1
+#
+#   Save the Recovery Key and Root Token. Then:
+#     docker exec tnt-openbao-hsm bao login <root-token>
+#     docker exec tnt-openbao-hsm bao secrets enable transit
+#     docker exec tnt-openbao-hsm bao write -f transit/keys/tnt-key
+#     docker exec tnt-openbao-hsm bao write -f transit/keys/tnt-hmac
+#
+# Subsequent restarts:
+#   OpenBao auto-unseals via PKCS#11 seal key in SoftHSM.
+#   No manual unseal required as long as volumes persist.
+#
+# Volumes:
+#   softhsm-tokens  — SoftHSM key material (CRITICAL — do not delete)
+#   openbao-data    — OpenBao encrypted storage
+#   pgdata-dev      — PostgreSQL data
+#
+# Security note:
+#   PINs are passed via environment variables from .env file.
+#   Create dev/.env with:
+#     SOFTHSM_PIN=dev-pin-1234
+#     SOFTHSM_SO_PIN=dev-so-pin-5678
+# ════════════════════════════════════════════════════════════════════
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: tnt-postgres
+    environment:
+      POSTGRES_DB: tnt_engine
+      POSTGRES_USER: tnt
+      POSTGRES_PASSWORD: tnt_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+      - ../sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tnt"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Redis ───────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: tnt-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── OpenBao + SoftHSM2 (PKCS#11 Seal) ──────────────────────────
+  openbao-hsm:
+    build:
+      context: ..
+      dockerfile: dev/Dockerfile.openbao-hsm
+    container_name: tnt-openbao-hsm
+    cap_add:
+      - IPC_LOCK            # Required for disable_mlock = false
+    environment:
+      # SoftHSM configuration — passed via .env file or explicitly
+      SOFTHSM_PIN: "${SOFTHSM_PIN:-dev-pin-1234}"
+      SOFTHSM_SO_PIN: "${SOFTHSM_SO_PIN:-dev-so-pin-5678}"
+      SOFTHSM_TOKEN_LABEL: "openbao-hsm"
+      SEAL_KEY_LABEL: "openbao-seal-key"
+      # OpenBao
+      BAO_ADDR: "http://127.0.0.1:8200"
+    ports:
+      - "8200:8200"
+      - "8201:8201"
+    volumes:
+      # CRITICAL: Both volumes must persist to avoid losing Master Key
+      - softhsm-tokens:/var/lib/softhsm/tokens
+      - openbao-data:/opt/openbao/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgdata-dev:
+    name: tnt-pgdata-dev
+  softhsm-tokens:
+    name: tnt-softhsm-tokens
+  openbao-data:
+    name: tnt-openbao-data

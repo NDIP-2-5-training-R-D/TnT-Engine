@@ -26,12 +26,29 @@ class TokenCache:
 
     def __init__(self, settings: Settings) -> None:
         self._ttl = settings.redis_token_ttl_seconds
+
+        # TLS: rewrite scheme if redis_ssl is enabled
+        url = settings.redis_url
+        if settings.redis_ssl and url.startswith("redis://"):
+            url = "rediss://" + url[len("redis://"):]
+
+        # TLS certificate parameters
+        ssl_kwargs: dict = {}
+        if settings.redis_ssl or url.startswith("rediss://"):
+            if settings.redis_ca_cert:
+                ssl_kwargs["ssl_ca_certs"] = settings.redis_ca_cert
+            if settings.redis_ssl_cert:
+                ssl_kwargs["ssl_certfile"] = settings.redis_ssl_cert
+            if settings.redis_ssl_key:
+                ssl_kwargs["ssl_keyfile"] = settings.redis_ssl_key
+
         self._pool = redis.ConnectionPool.from_url(
-            settings.redis_url,
+            url,
             max_connections=settings.redis_max_connections,
             decode_responses=True,
             socket_timeout=settings.redis_socket_timeout_seconds,
             socket_connect_timeout=settings.redis_connect_timeout_seconds,
+            **ssl_kwargs,
         )
         self._redis = redis.Redis(connection_pool=self._pool)
 

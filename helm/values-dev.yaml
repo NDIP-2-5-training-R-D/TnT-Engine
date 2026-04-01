@@ -34,5 +34,6 @@ config:
   TNT_DB_POOL_MAX: "20"
   TNT_REDIS_URL: "redis://redis.tnt-engine-dev.svc.cluster.local:6379/0"
   TNT_CRYPTO_BASE_URL: "http://openbao.tnt-engine-dev.svc.cluster.local:8200/v1"
+  TNT_ENVIRONMENT: "development"
   TNT_L1_MAX_SIZE: "1000"
   TNT_WORKER_CLEANUP_INTERVAL_SECONDS: "120"

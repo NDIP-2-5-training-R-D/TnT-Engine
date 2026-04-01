@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     db_pool_max: int = 50
     db_statement_timeout_ms: int = 10_000
 
+    # PostgreSQL TLS
+    db_ssl_mode: str = "disable"        # "disable", "require", "verify-ca", "verify-full"
+    db_ssl_ca_cert: str = ""            # Path to CA certificate file
+    db_ssl_client_cert: str = ""        # Path to client certificate (mTLS)
+    db_ssl_client_key: str = ""         # Path to client private key (mTLS)
+
     # PostgreSQL (read replica — optional)
     db_read_host: str = ""
     db_read_port: int = 5432
@@ -22,6 +28,12 @@ class Settings(BaseSettings):
     redis_max_connections: int = 50
     redis_socket_timeout_seconds: float = 2.0
     redis_connect_timeout_seconds: float = 3.0
+
+    # Redis TLS
+    redis_ssl: bool = False             # Enable TLS (auto-rewrites redis:// to rediss://)
+    redis_ca_cert: str = ""             # Path to CA certificate
+    redis_ssl_cert: str = ""            # Client cert path (mTLS)
+    redis_ssl_key: str = ""             # Client key path (mTLS)
 
     # L1 in-memory cache
     l1_max_size: int = 10_000
@@ -34,6 +46,40 @@ class Settings(BaseSettings):
     crypto_hmac_key: str = "tnt-hmac"
     crypto_timeout_seconds: float = 5.0
     crypto_max_retries: int = 3
+    crypto_verify_ssl: bool = True      # Verify OpenBao server certificate
+    crypto_ca_cert: str = ""            # Path to custom CA cert for OpenBao
+    crypto_client_cert: str = ""        # Client cert path (mTLS to OpenBao)
+    crypto_client_key: str = ""         # Client key path (mTLS to OpenBao)
+
+    # OpenBao auth method: "static", "approle", "kubernetes"
+    vault_auth_method: str = "static"
+    # AppRole auth
+    vault_approle_role_id: str = ""
+    vault_approle_secret_id: str = ""
+    vault_approle_mount: str = "approle"
+    # Kubernetes auth
+    vault_k8s_role: str = ""
+    vault_k8s_mount: str = "kubernetes"
+    vault_k8s_token_path: str = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+    # Token renewal
+    vault_token_renewal_buffer_seconds: int = 300  # renew when TTL < this
+
+    # HSM / PKCS#11
+    hsm_enabled: bool = False
+    hsm_pkcs11_library: str = "/usr/lib/softhsm/libsofthsm2.so"
+    hsm_slot: int = 0
+    hsm_pin: str = ""
+    hsm_encrypt_key_label: str = "tnt-encrypt-key"
+    hsm_hmac_key_label: str = "tnt-hmac-key"
+    hsm_session_pool_size: int = 5
+    hsm_operation_timeout_seconds: float = 10.0
+
+    # Crypto backend selection: "openbao", "hsm", "sandbox"
+    crypto_backend: str = "openbao"
+
+    # Environment: "development", "staging", "production"
+    # Used to enforce safety guards (e.g., block sandbox in production)
+    environment: str = "development"
 
     # Circuit breaker
     cb_failure_threshold: int = 5
@@ -46,6 +92,14 @@ class Settings(BaseSettings):
 
     # Idempotency / dedup
     dedup_ttl_seconds: int = 3600
+
+    # Audit delivery
+    audit_buffer_max_size: int = 5000
+    audit_flush_interval_seconds: float = 2.0
+    audit_flush_batch_size: int = 500
+    audit_max_retries: int = 3
+    audit_retry_backoff_seconds: float = 1.0
+    audit_dlq_path: str = "/tmp/tnt-audit-dlq.jsonl"
 
     # Workers
     worker_cleanup_interval_seconds: int = 60

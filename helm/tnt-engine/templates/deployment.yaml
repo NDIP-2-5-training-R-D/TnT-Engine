@@ -46,6 +46,8 @@ spec:
                 name: {{ include "tnt-engine.fullname" . }}
             - secretRef:
                 name: {{ include "tnt-engine.fullname" . }}
+                # Secret is created by ExternalSecret CRD (if enabled)
+                # or by the static secret.yaml template
           {{- with .Values.startupProbe }}
           startupProbe:
             {{- toYaml . | nindent 12 }}
@@ -65,7 +67,18 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.tlsCerts.enabled }}
+            - name: tls-certs
+              mountPath: /etc/tnt/certs
+              readOnly: true
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
             sizeLimit: 64Mi
+        {{- if .Values.tlsCerts.enabled }}
+        - name: tls-certs
+          secret:
+            secretName: {{ .Values.tlsCerts.secretName | default "tnt-engine-tls-certs" }}
+            optional: true
+        {{- end }}

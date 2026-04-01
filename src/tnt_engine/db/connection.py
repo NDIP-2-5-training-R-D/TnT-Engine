@@ -5,9 +5,12 @@ Supports:
   - Optional read replica pool (read-only queries)
   - Statement timeout enforcement
   - Pool size metrics
+  - TLS/mTLS connections (configurable via db_ssl_mode)
 """
 
 from __future__ import annotations
+
+import ssl
 
 import asyncpg
 
@@ -25,6 +28,7 @@ class Database:
 
     async def connect(self) -> None:
         timeout_ms = self._settings.db_statement_timeout_ms
+        ssl_ctx = self._build_ssl_context()
 
         async def _init_conn(conn: asyncpg.Connection) -> None:
             await conn.execute(f"SET statement_timeout = '{timeout_ms}'")
@@ -39,6 +43,7 @@ class Database:
             max_size=self._settings.db_pool_max,
             command_timeout=timeout_ms / 1000,
             init=_init_conn,
+            ssl=ssl_ctx,
         )
         DB_POOL_SIZE.labels(pool="primary").set(self._settings.db_pool_max)
 
@@ -54,8 +59,51 @@ class Database:
                 max_size=self._settings.db_pool_max,
                 command_timeout=timeout_ms / 1000,
                 init=_init_conn,
+                ssl=ssl_ctx,
             )
             DB_POOL_SIZE.labels(pool="read_replica").set(self._settings.db_pool_max)
+
+    def _build_ssl_context(self) -> ssl.SSLContext | None:
+        """Build SSL context based on db_ssl_mode setting.
+
+        Modes:
+          disable:     No TLS (returns None)
+          require:     TLS without certificate verification
+          verify-ca:   TLS with CA certificate verification
+          verify-full: TLS with CA cert + hostname verification
+        """
+        mode = self._settings.db_ssl_mode.lower()
+
+        if mode == "disable":
+            return None
+
+        ctx = ssl.create_default_context()
+
+        if mode == "require":
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        elif mode in ("verify-ca", "verify-full"):
+            if not self._settings.db_ssl_ca_cert:
+                raise ValueError(
+                    f"db_ssl_ca_cert is required when db_ssl_mode={mode}"
+                )
+            ctx.load_verify_locations(self._settings.db_ssl_ca_cert)
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            ctx.check_hostname = mode == "verify-full"
+        else:
+            raise ValueError(
+                f"Invalid db_ssl_mode: {mode!r}. "
+                f"Expected: disable, require, verify-ca, verify-full"
+            )
+
+        # Client certificate for mTLS
+        if self._settings.db_ssl_client_cert and self._settings.db_ssl_client_key:
+            ctx.load_cert_chain(
+                certfile=self._settings.db_ssl_client_cert,
+                keyfile=self._settings.db_ssl_client_key,
+            )
+
+        return ctx
 
     async def close(self) -> None:
         if self._pool:

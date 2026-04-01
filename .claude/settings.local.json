@@ -5,7 +5,10 @@
       "Bash(python3 -m pip install -e \".[dev]\")",
       "Bash(python3:*)",
       "Bash(find /Users/thiennlinh/Documents/GEIC/tnt-engine -type f \\\\\\(-name *.sh -o -name requirements* -o -name setup.py -o -name setup.cfg -o -name .github -o -name *.conf -o -name *.ini \\\\\\))",
-      "Bash(helm template:*)"
+      "Bash(helm template:*)",
+      "Bash(ls -la /Users/thiennlinh/Documents/GEIC/tnt-engine/*.*)",
+      "Bash(wc -l /Users/thiennlinh/Documents/GEIC/tnt-engine/src/tnt_engine/**/*.py)",
+      "Bash(grep -l \"integration\" /Users/thiennlinh/Documents/GEIC/tnt-engine/tests/*.py)"
     ]
   }
 }

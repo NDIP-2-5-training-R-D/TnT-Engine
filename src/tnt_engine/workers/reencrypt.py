@@ -7,6 +7,10 @@ When a new transit key version is deployed, this worker:
 4. Updates the token_store row
 
 Uses SKIP LOCKED for safe multi-replica operation.
+
+Security: Plaintext is wrapped in a SecureBuffer that is zeroed
+immediately after re-encryption. Exposure time is tracked via
+the tnt_reencrypt_plaintext_exposure_seconds histogram.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from prometheus_client import Counter
 
 from tnt_engine.config import Settings
 from tnt_engine.crypto.interface import EncryptionService
+from tnt_engine.crypto.secure_memory import secure_plaintext
 from tnt_engine.db.repository import TokenRepository
 from tnt_engine.logging import get_logger
 
@@ -88,8 +93,14 @@ class ReencryptWorker:
                 plaintext = await self._encryption.decrypt(
                     rec.value_encrypted, rec.key_version
                 )
-                # Re-encrypt with current key
-                new_ciphertext, new_version = await self._encryption.encrypt(plaintext)
+                # Wrap in SecureBuffer — zeroed after re-encryption
+                async with secure_plaintext(plaintext) as buf:
+                    new_ciphertext, new_version = await self._encryption.encrypt(
+                        buf.to_str()
+                    )
+                # plaintext reference cleared, buf zeroed
+                del plaintext
+
                 # Update DB
                 await self._repo.update_encrypted_value(
                     rec.token, new_ciphertext, new_version

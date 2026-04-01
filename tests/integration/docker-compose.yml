@@ -1,0 +1,46 @@
+# Integration test infrastructure — isolated ports to avoid dev conflicts.
+# Usage: docker compose -f tests/integration/docker-compose.yml up -d --wait
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: tnt_engine_test
+      POSTGRES_USER: tnt_test
+      POSTGRES_PASSWORD: tnt_test_secret
+    ports:
+      - "15432:5432"
+    volumes:
+      - ../../sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tnt_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  openbao:
+    image: quay.io/openbao/openbao:latest
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: test-token
+      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    ports:
+      - "18200:8200"
+    command: server -dev
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
