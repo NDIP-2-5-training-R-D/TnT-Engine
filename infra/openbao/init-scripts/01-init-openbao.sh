@@ -7,7 +7,7 @@ VAULT_TOKEN="root"
 # Wait for OpenBao to be healthy
 echo "Waiting for OpenBao at ${VAULT_ADDR}..."
 tries=0
-until curl -sf "${VAULT_ADDR}/v1/sys/health" > /dev/null 2>&1; do
+until curl -s --max-time 2 "${VAULT_ADDR}/v1/sys/health" > /dev/null 2>&1; do
   tries=$((tries + 1))
   if [ "$tries" -ge 30 ]; then
     echo "ERROR: OpenBao did not become healthy after 30 tries. Aborting."
