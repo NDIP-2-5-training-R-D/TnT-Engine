@@ -1,8 +1,7 @@
-import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from crypto_adapter.config import get_settings
+from crypto_adapter.auth import AppRoleAuth
 
 router = APIRouter()
 
@@ -14,11 +13,12 @@ async def health() -> dict:
 
 @router.get("/ready")
 async def ready() -> JSONResponse:
-    settings = get_settings()
+    # Import here to avoid circular import at module load time
+    from crypto_adapter.main import get_auth
+
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            resp = await client.get(f"{settings.OPENBAO_ADDR}/v1/sys/health")
-            resp.raise_for_status()
+        auth: AppRoleAuth = await get_auth()
+        await auth.get_token()
         return JSONResponse(
             status_code=200,
             content={"status": "ready", "openbao": "connected"},
