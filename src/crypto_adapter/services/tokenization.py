@@ -1,10 +1,18 @@
-"""Tokenization service: encrypt + encode into URL-safe opaque tokens (reversible)."""
+"""Tokenization service: encrypt + encode into URL-safe opaque tokens (reversible).
+
+Token format:  tt1_<base64url-no-padding>
+               where the base64url payload is the full OpenBao ciphertext
+               (including the vault:vN: version prefix).
+
+Encoding the complete ciphertext — rather than stripping the vault:vN: prefix —
+ensures tokens remain detokenizable after key rotation, when OpenBao starts
+returning vault:v2:, vault:v3:, … prefixes.
+"""
 import base64
 import re
 
 from crypto_adapter.client.openbao_client import OpenBaoClient
 
-_VAULT_PREFIX = "vault:v1:"
 _TOKEN_PREFIX = "tt1_"
 _B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -14,11 +22,15 @@ class TokenizationService:
         self._client = client
 
     async def tokenize(self, value: str, key_name: str) -> str:
-        """Encrypt *value* and return an opaque tt1_ token."""
+        """Encrypt *value* and return an opaque tt1_ token.
+
+        The full OpenBao ciphertext (vault:vN:…) is base64url-encoded so the
+        token remains valid across key rotations.
+        """
         ciphertext = await self._client.encrypt(value, key_name)
-        # Strip "vault:v1:" prefix, base64url-encode the remainder (no padding)
-        vault_suffix = ciphertext[len(_VAULT_PREFIX):]
-        encoded = base64.urlsafe_b64encode(vault_suffix.encode()).rstrip(b"=").decode()
+        encoded = (
+            base64.urlsafe_b64encode(ciphertext.encode()).rstrip(b"=").decode()
+        )
         return f"{_TOKEN_PREFIX}{encoded}"
 
     async def detokenize(self, token: str, key_name: str) -> str:
@@ -26,10 +38,8 @@ class TokenizationService:
         if not token.startswith(_TOKEN_PREFIX):
             raise ValueError("Invalid token format")
         encoded = token[len(_TOKEN_PREFIX):]
-        # Restore padding so b64decode is happy
         padding = (4 - len(encoded) % 4) % 4
-        vault_suffix = base64.urlsafe_b64decode(encoded + "=" * padding).decode()
-        ciphertext = _VAULT_PREFIX + vault_suffix
+        ciphertext = base64.urlsafe_b64decode(encoded + "=" * padding).decode()
         return await self._client.decrypt(ciphertext, key_name)
 
     @staticmethod

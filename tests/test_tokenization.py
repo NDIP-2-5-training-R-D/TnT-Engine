@@ -116,3 +116,27 @@ async def test_batch_tokenize_partial_failure():
 
     # The failure is at index 2 (bad-value)
     assert isinstance(outcomes[2], OpenBaoCryptoError)
+
+
+@pytest.mark.asyncio
+async def test_tokenize_survives_key_rotation():
+    """Tokens created after key rotation (vault:v2:…) must round-trip correctly.
+
+    This is a regression test for the bug where detokenize hardcoded
+    'vault:v1:' and broke after the first key rotation.
+    """
+    # Simulate OpenBao returning a v2 ciphertext after key rotation
+    original = "post-rotation-value"
+    fake_ct_v2 = "vault:v2:" + original  # minimal fake v2 ciphertext
+
+    client = _make_client(encrypt_return=fake_ct_v2, decrypt_return=original)
+    svc = TokenizationService(client)
+
+    token = await svc.tokenize(original, "test-key")
+    assert token.startswith("tt1_")
+
+    result = await svc.detokenize(token, "test-key")
+    assert result == original
+
+    # decrypt must be called with the FULL original v2 ciphertext, not vault:v1:…
+    client.decrypt.assert_awaited_once_with(fake_ct_v2, "test-key")

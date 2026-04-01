@@ -9,7 +9,7 @@ import time
 import uuid
 from typing import Optional
 
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger.json import JsonFormatter as _JsonFormatter
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -19,10 +19,11 @@ from starlette.responses import Response
 # ---------------------------------------------------------------------------
 
 _audit_logger = logging.getLogger("crypto_adapter.audit")
+_audit_logger.setLevel(logging.INFO)  # explicit — never rely on root logger level
 if not _audit_logger.handlers:
     _handler = logging.StreamHandler()
     _handler.setFormatter(
-        jsonlogger.JsonFormatter(
+        _JsonFormatter(
             fmt="%(asctime)s %(levelname)s %(name)s %(message)s",
             datefmt="%Y-%m-%dT%H:%M:%S",
         )

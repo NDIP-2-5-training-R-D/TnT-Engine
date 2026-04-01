@@ -69,6 +69,15 @@ class AppRoleAuth:
         )
 
     async def get_token(self) -> OpenBaoToken:
+        # Fast path: valid token already cached — no lock needed.
+        # asyncio is single-threaded so reading self._token here is race-free;
+        # the only yield points are inside `await self.login()` below.
+        if self._token is not None and not self._token.is_expired:
+            return self._token
+
+        # Slow path: acquire lock, re-check, then login if still needed.
+        # Other callers that arrive while login is in flight will wait here
+        # and find a fresh token on their turn — avoiding duplicate logins.
         async with self._lock:
             if self._token is None or self._token.is_expired:
                 logger.info("Token absent or expired — re-logging in")

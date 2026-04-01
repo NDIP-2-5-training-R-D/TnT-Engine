@@ -1,15 +1,9 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from crypto_adapter.auth.exceptions import (
-    CircuitBreakerOpenError,
-    OpenBaoAuthError,
-    OpenBaoCryptoError,
-    OpenBaoUnavailableError,
-)
 from crypto_adapter.client.openbao_client import OpenBaoClient
 
 logger = logging.getLogger(__name__)
@@ -61,19 +55,7 @@ class RotateKeyRequest(BaseModel):
 # ------------------------------------------------------------------ #
 
 
-def _raise_http(exc: Exception) -> None:
-    """Map domain exceptions to HTTP status codes."""
-    if isinstance(exc, OpenBaoAuthError):
-        raise HTTPException(status_code=401, detail=str(exc))
-    if isinstance(exc, (CircuitBreakerOpenError, OpenBaoUnavailableError)):
-        raise HTTPException(status_code=503, detail=str(exc))
-    if isinstance(exc, OpenBaoCryptoError):
-        raise HTTPException(status_code=422, detail=str(exc))
-    raise exc
-
-
 async def get_openbao_client() -> OpenBaoClient:
-    # Deferred import to avoid circular dependency at module load time
     from crypto_adapter.main import get_openbao_client as _get
 
     return await _get()
@@ -96,11 +78,7 @@ async def compute_hmac(
     client: Annotated[OpenBaoClient, Depends(get_openbao_client)],
 ) -> HmacResponse:
     key_name = _resolve_key(request.key_name)
-    try:
-        hmac_value = await client.hmac(request.input, key_name)
-    except Exception as exc:
-        _raise_http(exc)
-        raise  # unreachable; satisfies type checker
+    hmac_value = await client.hmac(request.input, key_name)
     return HmacResponse(hmac=hmac_value, key_name=key_name, algorithm="sha2-512")
 
 
@@ -110,11 +88,7 @@ async def encrypt(
     client: Annotated[OpenBaoClient, Depends(get_openbao_client)],
 ) -> EncryptResponse:
     key_name = _resolve_key(request.key_name)
-    try:
-        ciphertext = await client.encrypt(request.plaintext, key_name)
-    except Exception as exc:
-        _raise_http(exc)
-        raise
+    ciphertext = await client.encrypt(request.plaintext, key_name)
     return EncryptResponse(ciphertext=ciphertext, key_name=key_name)
 
 
@@ -124,11 +98,7 @@ async def decrypt(
     client: Annotated[OpenBaoClient, Depends(get_openbao_client)],
 ) -> DecryptResponse:
     key_name = _resolve_key(request.key_name)
-    try:
-        plaintext = await client.decrypt(request.ciphertext, key_name)
-    except Exception as exc:
-        _raise_http(exc)
-        raise
+    plaintext = await client.decrypt(request.ciphertext, key_name)
     return DecryptResponse(plaintext=plaintext)
 
 
@@ -138,11 +108,7 @@ async def key_info(
     key_name: str | None = Query(default=None),
 ) -> dict:
     resolved_key = _resolve_key(key_name)
-    try:
-        return await client.get_key_info(resolved_key)
-    except Exception as exc:
-        _raise_http(exc)
-        raise
+    return await client.get_key_info(resolved_key)
 
 
 @router.post("/rotate-key")
@@ -151,9 +117,5 @@ async def rotate_key(
     client: Annotated[OpenBaoClient, Depends(get_openbao_client)],
 ) -> dict:
     key_name = _resolve_key(request.key_name)
-    try:
-        await client.rotate_key(key_name)
-    except Exception as exc:
-        _raise_http(exc)
-        raise
+    await client.rotate_key(key_name)
     return {"rotated": True, "key_name": key_name}
