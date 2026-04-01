@@ -255,40 +255,77 @@ async def test_circuit_breaker_integration():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_audit_log_no_sensitive_data(client: httpx.AsyncClient):
-    """Capture the audit log output for one request and verify it contains
-    no plaintext, ciphertext, tokens, or HMAC values."""
+def test_audit_log_no_sensitive_data():
+    """Verify the audit log emits structured JSON that contains ZERO sensitive
+    data (input values, HMAC outputs, plaintext, ciphertext, tokens).
 
-    # We intercept the audit logger stream in-process via a StringIO handler
-    audit_logger = logging.getLogger("crypto_adapter.audit")
+    The audit middleware runs in the same process as the request handler, so
+    we use an in-process FastAPI TestClient to capture log output directly.
+    This approach is reliable regardless of whether docker-compose is running.
+    """
+    from unittest.mock import AsyncMock
 
-    log_stream = io.StringIO()
-    stream_handler = logging.StreamHandler(log_stream)
-    audit_logger.addHandler(stream_handler)
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from pythonjsonlogger.json import JsonFormatter as _JsonFormatter
 
-    try:
-        resp = await client.post(
-            "/internal/crypto",
-            json={"operation": "hmac", "input": "sensitive-value-12345"},
-        )
-        assert resp.status_code == 200, resp.text
-    finally:
-        audit_logger.removeHandler(stream_handler)
+    from crypto_adapter.middleware import AuditLogMiddleware, register_exception_handlers
+    from crypto_adapter.routers import internal as _internal_mod
+    from crypto_adapter.routers.internal import router as internal_router
 
-    log_output = log_stream.getvalue()
+    fake_hmac = "vault:v1:hmac-sha512:FAKE_HMAC_OUTPUT_DO_NOT_LOG"
+    mock_client = AsyncMock()
+    mock_client.hmac.return_value = fake_hmac
 
-    # The plaintext input must NEVER appear in logs
-    assert "sensitive-value-12345" not in log_output, (
-        "Plaintext input leaked into audit log"
+    isolated_app = FastAPI()
+    register_exception_handlers(isolated_app)
+    isolated_app.add_middleware(AuditLogMiddleware)
+    isolated_app.include_router(internal_router)
+    isolated_app.dependency_overrides[_internal_mod._get_client] = (
+        lambda: mock_client
     )
 
-    # The HMAC output must NEVER appear in logs
-    hmac_value = resp.json()["output"]
-    assert hmac_value not in log_output, "HMAC value leaked into audit log"
+    # Attach a JSON-formatted handler to the audit logger so we can inspect output
+    audit_logger = logging.getLogger("crypto_adapter.audit")
+    json_stream = io.StringIO()
+    json_handler = logging.StreamHandler(json_stream)
+    json_handler.setFormatter(_JsonFormatter())
+    audit_logger.addHandler(json_handler)
 
-    # Ensure at least one log line was written
+    sensitive_input = "sensitive-value-12345"
+    try:
+        with TestClient(isolated_app, raise_server_exceptions=False) as tc:
+            resp = tc.post(
+                "/internal/crypto",
+                json={"operation": "hmac", "input": sensitive_input},
+            )
+    finally:
+        audit_logger.removeHandler(json_handler)
+
+    assert resp.status_code == 200, resp.text
+    log_output = json_stream.getvalue()
+
+    # Log must have produced output
     assert log_output.strip(), "Audit log produced no output"
+
+    # Parse the JSON record to inspect fields precisely
+    import json as _json
+    log_record = _json.loads(log_output.strip())
+
+    # Sensitive fields must NOT appear anywhere in the raw log text
+    assert sensitive_input not in log_output, "Plaintext input leaked into audit log"
+    assert fake_hmac not in log_output, "HMAC output leaked into audit log"
+
+    # Structural checks: expected metadata fields must be present
+    assert log_record.get("operation") == "hmac"
+    assert log_record.get("success") is True
+    assert log_record.get("path") == "/internal/crypto"
+    assert "request_id" in log_record
+
+    # Sensitive field names must not appear as log record keys
+    forbidden_keys = {"input", "output", "plaintext", "ciphertext", "token", "hmac"}
+    leaked = forbidden_keys & set(log_record.keys())
+    assert not leaked, f"Sensitive keys leaked into audit record: {leaked}"
 
 
 # ---------------------------------------------------------------------------
