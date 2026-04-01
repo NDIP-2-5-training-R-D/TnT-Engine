@@ -18,7 +18,10 @@ until curl -sf "${VAULT_ADDR}/v1/sys/health" > /dev/null 2>&1; do
 done
 echo "OpenBao is healthy."
 
-# Enable transit secrets engine
+# ---------------------------------------------------------------------------
+# Transit secrets engine
+# ---------------------------------------------------------------------------
+
 echo "Enabling transit engine..."
 curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
@@ -26,15 +29,66 @@ curl -sf \
   --data '{"type":"transit"}' \
   "${VAULT_ADDR}/v1/sys/mounts/transit" > /dev/null
 
-# Create encryption key
-echo "Creating transit key 'tt-engine-key'..."
+echo "Creating transit key 'tt-engine-key' (aes256-gcm96)..."
 curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
   --request POST \
   --data '{"type":"aes256-gcm96"}' \
   "${VAULT_ADDR}/v1/transit/keys/tt-engine-key" > /dev/null
 
-# Enable AppRole auth method
+# ---------------------------------------------------------------------------
+# Transform secrets engine (format-preserving encryption)
+# ---------------------------------------------------------------------------
+
+echo "Enabling transform engine..."
+curl -sf \
+  --header "X-Vault-Token: ${VAULT_TOKEN}" \
+  --request POST \
+  --data '{"type":"transform"}' \
+  "${VAULT_ADDR}/v1/sys/mounts/transform" > /dev/null
+
+echo "Creating transform role 'tt-engine'..."
+curl -sf \
+  --header "X-Vault-Token: ${VAULT_TOKEN}" \
+  --request POST \
+  --data '{"transformations":["tt-fpe-ccn"]}' \
+  "${VAULT_ADDR}/v1/transform/role/tt-engine" > /dev/null
+
+echo "Creating FPE transformation 'tt-fpe-ccn' (credit-card numbers)..."
+curl -sf \
+  --header "X-Vault-Token: ${VAULT_TOKEN}" \
+  --request POST \
+  --data '{
+    "type": "fpe",
+    "template": "builtin/creditcardnumber",
+    "tweak_source": "internal",
+    "allowed_roles": ["tt-engine"]
+  }' \
+  "${VAULT_ADDR}/v1/transform/transformations/fpe/tt-fpe-ccn" > /dev/null
+
+echo "Creating FPE transformation 'tt-fpe-ssn' (US social security numbers)..."
+curl -sf \
+  --header "X-Vault-Token: ${VAULT_TOKEN}" \
+  --request POST \
+  --data '{
+    "type": "fpe",
+    "template": "builtin/socialsecuritynumber",
+    "tweak_source": "internal",
+    "allowed_roles": ["tt-engine"]
+  }' \
+  "${VAULT_ADDR}/v1/transform/transformations/fpe/tt-fpe-ssn" > /dev/null
+
+# Update role to include the SSN transformation as well
+curl -sf \
+  --header "X-Vault-Token: ${VAULT_TOKEN}" \
+  --request POST \
+  --data '{"transformations":["tt-fpe-ccn","tt-fpe-ssn"]}' \
+  "${VAULT_ADDR}/v1/transform/role/tt-engine" > /dev/null
+
+# ---------------------------------------------------------------------------
+# AppRole auth
+# ---------------------------------------------------------------------------
+
 echo "Enabling AppRole auth..."
 curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
@@ -42,17 +96,15 @@ curl -sf \
   --data '{"type":"approle"}' \
   "${VAULT_ADDR}/v1/sys/auth/approle" > /dev/null
 
-# Create policy
 echo "Creating policy 'tt-engine-policy'..."
 curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
   --request PUT \
   --data '{
-    "policy": "path \"transit/*\" { capabilities = [\"create\", \"read\", \"update\"] }\npath \"auth/token/renew-self\" { capabilities = [\"update\"] }"
+    "policy": "path \"transit/*\" { capabilities = [\"create\", \"read\", \"update\"] }\npath \"transform/*\" { capabilities = [\"create\", \"read\", \"update\"] }\npath \"auth/token/renew-self\" { capabilities = [\"update\"] }"
   }' \
   "${VAULT_ADDR}/v1/sys/policies/acl/tt-engine-policy" > /dev/null
 
-# Create AppRole role
 echo "Creating AppRole 'tt-engine'..."
 curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
@@ -64,26 +116,28 @@ curl -sf \
   }' \
   "${VAULT_ADDR}/v1/auth/approle/role/tt-engine" > /dev/null
 
-# Read role_id
+# ---------------------------------------------------------------------------
+# Output credentials
+# ---------------------------------------------------------------------------
+
 echo ""
 echo "=== Credentials ==="
 ROLE_ID_RESPONSE=$(curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
   "${VAULT_ADDR}/v1/auth/approle/role/tt-engine/role-id")
 
-# Extract role_id without jq using sed
 ROLE_ID=$(echo "$ROLE_ID_RESPONSE" | sed 's/.*"role_id":"\([^"]*\)".*/\1/')
 echo "OPENBAO_ROLE_ID=${ROLE_ID}"
 
-# Generate secret_id
 SECRET_ID_RESPONSE=$(curl -sf \
   --header "X-Vault-Token: ${VAULT_TOKEN}" \
   --request POST \
   "${VAULT_ADDR}/v1/auth/approle/role/tt-engine/secret-id")
 
-# Extract secret_id without jq using sed
 SECRET_ID=$(echo "$SECRET_ID_RESPONSE" | sed 's/.*"secret_id":"\([^"]*\)".*/\1/')
 echo "OPENBAO_SECRET_ID=${SECRET_ID}"
 
 echo ""
-echo "=== OpenBao init complete. Copy above values to .env ==="
+echo "=== OpenBao init complete ==="
+echo "Engines:  transit (HMAC/encrypt/decrypt), transform (FPE: CCN + SSN)"
+echo "Copy OPENBAO_ROLE_ID and OPENBAO_SECRET_ID into your .env file."
