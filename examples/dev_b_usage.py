@@ -14,7 +14,7 @@ import hashlib
 
 from tnt_engine.cache.layered import LayeredCache
 from tnt_engine.cache.redis import TokenCache
-from tnt_engine.config import Settings, settings
+from tnt_engine.config import settings
 from tnt_engine.crypto.circuit_breaker import CircuitBreakerBackend
 from tnt_engine.crypto.interface import CryptoBackend
 from tnt_engine.db.connection import Database
@@ -27,6 +27,7 @@ from tnt_engine.service.token_service import TokenService
 # ─────────────────────────────────────────────────────────────────────
 # Step 1: Dev B implements the CryptoBackend interface
 # ─────────────────────────────────────────────────────────────────────
+
 
 class MyHSMCryptoBackend(CryptoBackend):
     """Example: custom crypto backend backed by an HSM or cloud KMS.
@@ -54,9 +55,7 @@ class MyHSMCryptoBackend(CryptoBackend):
         key_version = 1
         return ciphertext, key_version
 
-    async def decrypt(
-        self, ciphertext: str, key_version: int, key_name: str | None = None
-    ) -> str:
+    async def decrypt(self, ciphertext: str, key_version: int, key_name: str | None = None) -> str:
         """Decrypt ciphertext using the specified key version."""
         # In production: call HSM decrypt API with key version routing
         b64 = ciphertext.split(":", 2)[2]
@@ -70,6 +69,7 @@ class MyHSMCryptoBackend(CryptoBackend):
 # ─────────────────────────────────────────────────────────────────────
 # Step 2: Wire the custom backend into the platform
 # ─────────────────────────────────────────────────────────────────────
+
 
 async def create_client_with_custom_backend() -> TNTClient:
     """Create a TNTClient using Dev B's custom crypto backend."""

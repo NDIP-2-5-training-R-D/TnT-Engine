@@ -145,9 +145,7 @@ class TNTClient:
         resp = await self._shield(self._svc.tokenize, req)
         return resp.token
 
-    async def detokenize(
-        self, token: str, tenant_id: str, context: dict | None = None
-    ) -> str:
+    async def detokenize(self, token: str, tenant_id: str, context: dict | None = None) -> str:
         """Detokenize a token back to the original plaintext."""
         return await self._shield(self._svc.detokenize, token, tenant_id)
 
@@ -160,9 +158,7 @@ class TNTClient:
     ) -> list[str]:
         """Tokenize multiple values. items: list of (value, field_type) tuples."""
         reqs = [
-            TokenizeRequest(
-                value=v, field=f, tenant_id=tenant_id, transformation=transformation
-            )
+            TokenizeRequest(value=v, field=f, tenant_id=tenant_id, transformation=transformation)
             for v, f in items
         ]
         results = await self._shield(self._svc.batch_tokenize, reqs)
@@ -209,9 +205,7 @@ class TNTClient:
         Policy format: {"field": "ssn", "action": "TOKENIZE"}
         Actions: TOKENIZE, MASK, HASH, PASSTHROUGH
         """
-        return await self._shield(
-            self._policy.process_field, policy, value, tenant_id, context
-        )
+        return await self._shield(self._policy.process_field, policy, value, tenant_id, context)
 
     async def process_record(
         self,
@@ -225,9 +219,7 @@ class TNTClient:
         Returns {field_name: FieldResult}.
         TOKENIZE fields are batched automatically for performance.
         """
-        return await self._shield(
-            self._policy.process_record, policies, values, tenant_id, context
-        )
+        return await self._shield(self._policy.process_record, policies, values, tenant_id, context)
 
     # ── Infrastructure ───────────────────────────────────────────────
 

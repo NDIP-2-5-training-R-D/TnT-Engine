@@ -33,9 +33,7 @@ class EncryptionService(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def decrypt(
-        self, ciphertext: str, key_version: int, key_name: str | None = None
-    ) -> str:
+    async def decrypt(self, ciphertext: str, key_version: int, key_name: str | None = None) -> str:
         """Decrypt ciphertext using the specified key version."""
         ...
 
