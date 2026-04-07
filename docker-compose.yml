@@ -78,6 +78,34 @@ services:
       retries: 10
       start_period: 15s
 
+  control-plane:
+    build:
+      context: ./control-plane
+      dockerfile: Dockerfile
+    ports:
+      - "3100:3100"
+    environment:
+      VAULT_ADDR: "http://openbao:8200"
+      VAULT_TOKEN: "dev-token"
+      TNT_ENGINE_URL: "http://tnt-engine:8000"
+      NEXTAUTH_URL: "http://localhost:3100"
+      NEXTAUTH_SECRET: "dev-secret-change-me"
+      AUTH_PROVIDER: "credentials"
+      WATCHPACK_POLLING: "true"
+      PG_HOST: "postgres"
+      PG_PORT: "5432"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+    volumes:
+      - ./control-plane:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      openbao:
+        condition: service_started
+      tnt-engine:
+        condition: service_started
+
   # SoftHSM2 — only starts with: docker compose --profile hsm up
   softhsm:
     profiles: ["hsm"]
