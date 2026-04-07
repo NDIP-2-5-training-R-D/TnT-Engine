@@ -131,7 +131,15 @@ export interface TransformRulesResponse {
 
 // ── Playground ─────────────────────────────────────────────────────
 
-export type PlaygroundOperation = "TOKENIZE" | "MASK" | "HMAC" | "DETOKENIZE";
+export type PlaygroundOperation =
+  | "TOKENIZE"
+  | "MASK"
+  | "HMAC"
+  | "DETOKENIZE"
+  | "HMAC_SHA512"
+  | "AES256_GCM96"
+  | "FF3_1"
+  | "MASK_TEMPLATE";
 
 export interface PlaygroundResult {
   operation: PlaygroundOperation;
