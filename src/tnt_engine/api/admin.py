@@ -177,6 +177,51 @@ async def audit_dlq_replay(request: Request) -> dict:
     return {"status": "replayed", "entries_recovered": count}
 
 
+# ── Token Lifecycle Management ────────────────────────────────────────
+
+@admin_router.get("/tokens")
+async def list_tokens(
+    request: Request,
+    tenant_id: str = "",
+    status: str | None = None,
+    transformation: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """List token records — safe metadata only, no plaintext or ciphertext.
+
+    Fields returned: token, transformation, key_version, tenant_id,
+                     status, expires_at, created_at, updated_at.
+    value_encrypted is intentionally excluded.
+    """
+    db = getattr(request.app.state, "db", None)
+    if not db:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    if limit > 200:
+        raise HTTPException(status_code=400, detail="limit cannot exceed 200")
+
+    from tnt_engine.db.repository import TokenRepository
+    repo = TokenRepository(db)
+
+    tokens = await repo.list_tokens(
+        tenant_id=tenant_id or None,
+        status=status,
+        transformation=transformation,
+        limit=limit,
+        offset=offset,
+    )
+    stats = await repo.count_tokens_by_status(tenant_id=tenant_id or None)
+
+    return {
+        "tokens": tokens,
+        "count": len(tokens),
+        "stats": stats,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
 class AuditQueryParams(BaseModel):
     tenant_id: str = ""
     action: str | None = None

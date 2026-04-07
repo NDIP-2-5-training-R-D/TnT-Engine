@@ -247,6 +247,59 @@ class TokenRepository:
         )
         return row["cnt"]
 
+    @_track("list_tokens")
+    async def list_tokens(
+        self,
+        tenant_id: str | None = None,
+        status: str | None = None,
+        transformation: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[dict]:
+        """List token records — SAFE metadata only (no value_encrypted or plaintext)."""
+        conditions: list[str] = []
+        params: list = []
+        idx = 1
+
+        if tenant_id:
+            conditions.append(f"tenant_id = ${idx}"); params.append(tenant_id); idx += 1
+        if status:
+            conditions.append(f"status = ${idx}"); params.append(status.upper()); idx += 1
+        if transformation:
+            conditions.append(f"transformation = ${idx}"); params.append(transformation.upper()); idx += 1
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = await self._db.read_pool.fetch(
+            f"""
+            SELECT token, transformation, key_version, tenant_id,
+                   status::text, expires_at, created_at, updated_at
+            FROM token_store
+            {where}
+            ORDER BY created_at DESC
+            LIMIT ${idx} OFFSET ${idx + 1}
+            """,
+            *params, limit, offset,
+        )
+        result = []
+        for row in rows:
+            record = dict(row)
+            for k, v in record.items():
+                if hasattr(v, "isoformat"):
+                    record[k] = v.isoformat()
+            result.append(record)
+        return result
+
+    @_track("count_tokens_by_status")
+    async def count_tokens_by_status(self, tenant_id: str | None = None) -> dict[str, int]:
+        """Count tokens grouped by status for dashboard stats."""
+        where = "WHERE tenant_id = $1" if tenant_id else ""
+        params = [tenant_id] if tenant_id else []
+        rows = await self._db.read_pool.fetch(
+            f"SELECT status::text, COUNT(*)::int AS cnt FROM token_store {where} GROUP BY status",
+            *params,
+        )
+        return {row["status"]: row["cnt"] for row in rows}
+
     # ------------------------------------------------------------------
     # Cache rebuild support
     # ------------------------------------------------------------------

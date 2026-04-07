@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Key, FileCode, UserPlus, Wand2,
   FileText, AlertTriangle, Shield, ShieldCheck,
-  Database, Download,
+  Database, FlaskConical, KeyRound, BarChart2, ClipboardList,
+  Network, Bell, Users,
 } from "lucide-react";
 import clsx from "clsx";
 import NamespaceSwitcher from "./NamespaceSwitcher";
@@ -15,7 +16,9 @@ const navSections = [
     label: "Monitor",
     links: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/alerts", label: "Alerts", icon: Bell },
       { href: "/audit", label: "Audit Log", icon: FileText },
+      { href: "/analytics", label: "Analytics", icon: BarChart2 },
     ],
   },
   {
@@ -26,13 +29,23 @@ const navSections = [
       { href: "/approles", label: "AppRoles", icon: UserPlus },
       { href: "/transforms", label: "Transform Rules", icon: Wand2 },
       { href: "/approvals", label: "Approvals", icon: ShieldCheck },
+      { href: "/tokens", label: "Token Lifecycle", icon: KeyRound },
+      { href: "/users", label: "User Management", icon: Users },
     ],
   },
   {
     label: "Operations",
     links: [
       { href: "/backups", label: "Backups", icon: Database },
+      { href: "/raft", label: "Raft Cluster", icon: Network },
       { href: "/emergency", label: "Emergency", icon: AlertTriangle },
+      { href: "/compliance", label: "Compliance", icon: ClipboardList },
+    ],
+  },
+  {
+    label: "Developer",
+    links: [
+      { href: "/playground", label: "Playground", icon: FlaskConical },
     ],
   },
 ];
