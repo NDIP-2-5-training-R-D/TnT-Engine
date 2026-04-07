@@ -183,13 +183,19 @@
 
 File đã cập nhật: `helm/values-prod.yaml`
 
+### Đã điều chỉnh qua test K8s local (LoadBalancer)
+
+| Thông số | Giá trị | Căn cứ |
+|---------|---------|--------|
+| `minReplicas` | 5 | Test spike 5 pods → 48.7% success (từ 28%) |
+
 ### Chưa thể điều chỉnh (cần cluster thật)
 
 | Thông số | Lý do |
 |---------|-------|
-| `minReplicas / maxReplicas` | Chưa biết throughput thực trên hạ tầng công ty |
-| `targetCPUUtilizationPercentage` | Chưa đo CPU thực trên K8s node thật |
-| `HPA trigger` | port-forward làm lệch số liệu |
+| `maxReplicas` | Chưa biết throughput thực trên hạ tầng công ty |
+| `targetCPUUtilizationPercentage` | App I/O bound — CPU 3% khi spike, HPA CPU không phù hợp |
+| `HPA custom metric` | Cần KEDA hoặc Prometheus Adapter, chưa setup |
 | Network latency | Chưa có network thật giữa pod và OpenBao/DB |
 
 ---
@@ -210,5 +216,83 @@ File đã cập nhật: `helm/values-prod.yaml`
 ### Cần bổ sung
 - Chạy lại 4 bài test trên **cluster thật** của công ty (không dùng port-forward)
 - Đo `docker stats` trong lúc chạy **load test** (không chỉ soak) để có CPU baseline chính xác hơn
-- Test với **HPA tự động scale** để đo throughput khi nhiều pod
-- Cân nhắc tăng `backpressure threshold` nếu muốn chịu spike tốt hơn trên production
+- Setup HPA theo custom metric `tnt_inflight_requests` thay vì CPU (cần KEDA hoặc Prometheus Adapter)
+- Scale OpenBao theo shard tenant khi traffic thực vượt ~1,200 req/s
+
+---
+
+## Cải thiện Spike — Kết quả 3 hướng test
+
+### Bối cảnh
+Spike test (500 concurrent) cho thấy tỉ lệ thành công chỉ 28% (1 pod, Docker). Bottleneck được xác định là **OpenBao crypto layer** — throughput tối đa ~1,200 req/s bất kể concurrent hay số pod.
+
+### Hướng 1 — Tăng backpressure threshold (đã test, bác bỏ)
+
+**Thay đổi:** `TNT_MAX_CONCURRENT=400` (mặc định 200)
+
+| Chỉ số | Threshold 200 | Threshold 400 |
+|--------|--------------|--------------|
+| Success | 8,304 (28%) | 6,479 (21.6%) |
+| P99 | 1,003ms | 5,434ms |
+| Req/s | 2,712 | 1,233 |
+| Connection reset | 0 | ~170 lỗi |
+
+**Kết luận:** Tệ hơn. Tăng threshold khiến 400 request xếp hàng chờ OpenBao → latency tăng vọt, connection reset. Reject nhanh (503) tốt hơn timeout chậm. **Giữ nguyên threshold 200.**
+
+---
+
+### Hướng 2 — Tăng minReplicas (đã test, hiệu quả nhất)
+
+**Thay đổi:** `minReplicas: 2` → `5`, test trên K8s local với LoadBalancer (không dùng port-forward)
+
+| Chỉ số | 1 pod | 5 pods |
+|--------|-------|--------|
+| Success | 8,304 (28%) | 14,618 (48.7%) |
+| P99 | 1,003ms | 2,397ms |
+| Req/s | 2,712 | 1,411 |
+| Connection reset | 0 | 0 |
+
+**Kết luận:** Success rate tăng gần gấp đôi. Vẫn còn 51% shed vì OpenBao là 1 instance duy nhất shared giữa tất cả pod — throughput crypto không scale theo số pod. **Đây là hướng hiệu quả nhất hiện tại.**
+
+---
+
+### Hướng 3 — HPA scale nhanh hơn (đã test, không hiệu quả)
+
+**Thay đổi:** `stabilizationWindowSeconds: 30` → `0`, `periodSeconds: 60` → `15`, bắt đầu từ 2 pod
+
+| Chỉ số | Giá trị |
+|--------|---------|
+| Success | 13,625 (45%) |
+| CPU trong lúc spike | 3% (không vượt ngưỡng 70%) |
+| HPA scale up | Không xảy ra |
+
+**Kết luận:** HPA không kích hoạt vì app là **I/O bound** — khi spike, app chủ yếu đợi OpenBao trả lời, không tốn CPU. HPA CPU-based không phù hợp với workload này. Cần scale theo custom metric `tnt_inflight_requests` (đã export qua Prometheus) — cần KEDA hoặc Prometheus Adapter để implement.
+
+---
+
+### Tổng kết
+
+| Hướng | Success rate | Kết quả |
+|-------|-------------|---------|
+| 1 pod, threshold 200 (gốc) | 28% | Baseline |
+| Tăng threshold 400 | 21.6% | Tệ hơn — bác bỏ |
+| **5 pods, threshold 200** | **48.7%** | **Tốt nhất** |
+| 2 pods + HPA CPU | ~45% | HPA không trigger |
+
+**Khuyến nghị production:** `minReplicas` cao (≥5) + chờ đủ data thực để scale OpenBao theo shard tenant khi cần.
+
+---
+
+## Lộ trình tối ưu production
+
+Cache hit rate — yếu tố quyết định có cần scale OpenBao hay không — chỉ đo được khi có **data thực từ production** (cùng số CMND, số điện thoại được tokenize nhiều lần). Trên local test, data random 100% → cache miss 100% → không phản ánh thực tế.
+
+**Thứ tự đúng:**
+
+1. Lên cluster công ty với `minReplicas: >= 5`
+2. Chạy với data thực một thời gian
+3. Đo cache hit rate qua Prometheus (metric `tnt_cache_hits_total` / `tnt_cache_requests_total` đã có sẵn)
+4. Nếu hit rate cao → OpenBao không phải vấn đề, không cần scale
+5. Nếu hit rate thấp + OpenBao vẫn là bottleneck → implement sharding theo tenant
+
+Tránh over-engineering trước khi có data thực.

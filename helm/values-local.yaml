@@ -1,6 +1,6 @@
 # Local K8s (Docker Desktop) — dùng docker-compose services qua host.docker.internal
 
-replicaCount: 2
+replicaCount: 5
 
 image:
   repository: tnt-engine-tnt-engine
@@ -17,8 +17,8 @@ resources:
 
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 6
+  minReplicas: 5
+  maxReplicas: 10
   targetCPUUtilizationPercentage: 70
 
 pdb:
