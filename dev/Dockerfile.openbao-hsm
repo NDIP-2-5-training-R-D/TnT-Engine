@@ -26,12 +26,12 @@ USER root
 
 # ── Install SoftHSM2 + PKCS#11 tools ───────────────────────────────
 RUN apk add --no-cache \
-        softhsm \
-        opensc \
-        gettext \
-        bash \
-        curl \
-        jq
+    softhsm \
+    opensc \
+    gettext \
+    bash \
+    curl \
+    jq
 
 # ── SoftHSM2 configuration ─────────────────────────────────────────
 RUN mkdir -p /var/lib/softhsm/tokens /etc/softhsm && \

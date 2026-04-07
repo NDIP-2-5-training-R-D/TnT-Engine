@@ -8,12 +8,12 @@ metadata:
     version: v0.4.0
 spec:
   replicas: 3
-  revisionHistoryLimit: 5                    # keep 5 rollback versions
+  revisionHistoryLimit: 5 # keep 5 rollback versions
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1                            # add 1 pod at a time
-      maxUnavailable: 0                      # zero downtime
+      maxSurge: 1 # add 1 pod at a time
+      maxUnavailable: 0 # zero downtime
   selector:
     matchLabels:
       app: tnt-engine
@@ -91,7 +91,7 @@ spec:
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 5
-            failureThreshold: 12              # 60s max startup
+            failureThreshold: 12 # 60s max startup
 
           securityContext:
             runAsNonRoot: true

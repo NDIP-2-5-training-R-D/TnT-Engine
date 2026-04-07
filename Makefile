@@ -1,6 +1,6 @@
 .PHONY: help dev test lint build push deploy rollback migrate backup
 
-IMAGE ?= ghcr.io/geic/tnt-engine
+IMAGE ?= ghcr.io/thiennlinh/tnt-engine
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 ENV ?= dev
 NAMESPACE ?= tnt-engine
