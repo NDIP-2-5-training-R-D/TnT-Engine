@@ -87,3 +87,37 @@ _STRATEGIES: dict[str, callable] = {
     "first_name": _mask_name,
     "last_name": _mask_name,
 }
+
+
+def apply_mask_template(value: str, template: str) -> str:
+    """Apply a user-supplied masking template to value.
+
+    Template syntax:
+        '#' — reveal the character at this position (pass-through)
+        '*' — mask the character at this position (replace with '*')
+        any other character — literal separator inserted into the output
+                              (does NOT consume a character from value)
+
+    Examples:
+        apply_mask_template("1234567890123456", "****-****-****-####")
+        → "****-****-****-3456"
+
+        apply_mask_template("user@example.com", "###@****")
+        → "use@****"
+
+    If the template is longer than value (after accounting for separators),
+    remaining '#' positions emit '#' and remaining '*' positions emit '*'.
+    """
+    out: list[str] = []
+    vi = 0
+    for tc in template:
+        if tc == "#":
+            out.append(value[vi] if vi < len(value) else "#")
+            vi += 1
+        elif tc == "*":
+            if vi < len(value):
+                vi += 1
+            out.append("*")
+        else:
+            out.append(tc)  # literal separator — does not advance value index
+    return "".join(out)

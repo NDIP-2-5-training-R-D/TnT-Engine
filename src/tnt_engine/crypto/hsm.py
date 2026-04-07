@@ -80,6 +80,45 @@ class HSMCryptoBackend(CryptoBackend):
             CRYPTO_ERRORS.labels(operation="hmac").inc()
             raise EncryptionError("hmac", str(exc)) from exc
 
+    async def hmac_sha512(self, plaintext: str, key_name: str | None = None) -> str:
+        """HMAC-SHA-512 via HSM CKM_SHA512_HMAC mechanism."""
+        label = key_name or self._hmac_key_label
+        t0 = time.monotonic()
+        try:
+            result = await asyncio.wait_for(
+                self._run_hmac_sha512(plaintext.encode(), label),
+                timeout=self._timeout,
+            )
+            CRYPTO_LATENCY.labels(operation="hmac_sha512").observe(time.monotonic() - t0)
+            return result
+        except asyncio.TimeoutError:
+            CRYPTO_ERRORS.labels(operation="hmac_sha512").inc()
+            raise EncryptionError("hmac_sha512", "HSM operation timed out")
+        except (HSMError, EncryptionError):
+            CRYPTO_ERRORS.labels(operation="hmac_sha512").inc()
+            raise
+        except Exception as exc:
+            CRYPTO_ERRORS.labels(operation="hmac_sha512").inc()
+            raise EncryptionError("hmac_sha512", str(exc)) from exc
+
+    async def _run_hmac_sha512(self, data: bytes, label: str) -> str:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, partial(self._hmac_sha512_sync, data, label))
+
+    def _hmac_sha512_sync(self, data: bytes, label: str) -> str:
+        session = self._pool.acquire(timeout=self._timeout)
+        try:
+            key = self._pool.find_key(session, label)
+            mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA512_HMAC)
+            signature = session.sign(key, data, mechanism)
+            return bytes(signature).hex()
+        except HSMError:
+            raise
+        except PyKCS11.PyKCS11Error as exc:
+            raise EncryptionError("hmac_sha512", str(exc)) from exc
+        finally:
+            self._pool.release(session)
+
     async def _run_hmac(self, data: bytes, label: str) -> str:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, partial(self._hmac_sync, data, label))
@@ -193,6 +232,45 @@ class HSMCryptoBackend(CryptoBackend):
             raise EncryptionError("decrypt", str(exc)) from exc
         finally:
             self._pool.release(session)
+
+    async def encrypt_aes256_gcm96(
+        self, plaintext: str, key_name: str | None = None
+    ) -> tuple[str, int]:
+        """AES-256-GCM96 via HSM — same mechanism as encrypt() with dedicated key label."""
+        # HSM already uses CKM_AES_GCM (AES-256-GCM) — reuse the same code path.
+        return await self.encrypt(plaintext, key_name)
+
+    async def fpe_ff31(self, plaintext: str, key_name: str | None = None) -> str:
+        """FF3-1 FPE via HSM — Feistel simulation using the HMAC key for round derivation.
+
+        Standard PKCS#11 (CKM_AES_CBC, CKM_AES_ECB) does not include CKM_AES_FF3.
+        A full FF3-1 implementation requires a vendor-specific mechanism or an
+        external FPE library. This implementation uses a Feistel network with
+        CKM_SHA256_HMAC as the round function, providing format-preserving output
+        derived from HSM-managed key material.
+        """
+        label = key_name or self._hmac_key_label
+        t0 = time.monotonic()
+        try:
+            # Derive round key from HSM HMAC of the plaintext
+            hmac_hex = await asyncio.wait_for(
+                self._run_hmac(plaintext.encode(), label),
+                timeout=self._timeout,
+            )
+            round_key = hmac_hex.encode()
+            from tnt_engine.crypto.openbao import _feistel_fpe
+            result = _feistel_fpe(plaintext, round_key)
+            CRYPTO_LATENCY.labels(operation="ff3_1").observe(time.monotonic() - t0)
+            return result
+        except asyncio.TimeoutError:
+            CRYPTO_ERRORS.labels(operation="ff3_1").inc()
+            raise EncryptionError("ff3_1", "HSM operation timed out")
+        except (HSMError, EncryptionError):
+            CRYPTO_ERRORS.labels(operation="ff3_1").inc()
+            raise
+        except Exception as exc:
+            CRYPTO_ERRORS.labels(operation="ff3_1").inc()
+            raise EncryptionError("ff3_1", str(exc)) from exc
 
     async def close(self) -> None:
         self._pool.close()

@@ -1,18 +1,20 @@
 // BFF: T&T Engine Simulation Playground
-// POST: proxy a tokenize/mask/hmac/detokenize operation to the T&T Engine sandbox tenant,
-//       or execute advanced crypto operations (HMAC-SHA-512, AES256-GCM96, FF3-1, MASKING TEMPLATE)
-//       directly in the sandbox BFF layer.
+// POST: proxy ALL transformation operations to the T&T Engine sandbox tenant.
 //
 // Security guarantees:
-//   - All engine operations use tenant_id="sandbox" — isolated from production data.
+//   - All operations use tenant_id="sandbox" — isolated from production data.
 //   - Original plaintext NEVER appears in the JSON response sent to the client.
 //   - Rate limited to 10 requests per minute per authenticated user.
 //   - Input size capped at 1 KB.
 //   - Governance check enforced server-side (mirrors classification.py logic).
+//
+// Crypto is NEVER computed in the BFF — all transformations (including
+// HMAC-SHA-512, AES256-GCM96, FF3-1, MASKING TEMPLATE) are delegated to
+// the T&T Engine, which uses OpenBao Transit (or sandbox backend) and
+// writes a full audit log entry for every operation.
 
 export const dynamic = "force-dynamic";
 
-import { createHmac, createCipheriv, randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
@@ -23,11 +25,6 @@ const SANDBOX_TENANT = "sandbox";
 const MAX_VALUE_BYTES = 1_024;
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX = 10;
-
-// Stable sandbox keys — NOT secrets, only used for demo/sandbox crypto.
-const SANDBOX_HMAC_512_KEY = "sandbox-hmac-sha512-demo-key";
-const SANDBOX_AES_KEY = createHmac("sha256", "sandbox").update("aes256-gcm96-key").digest(); // 32 bytes
-const SANDBOX_FF31_KEY = "sandbox-ff31-fpe-demo-key";
 
 // ── Per-user in-memory rate limiter ────────────────────────────────
 
@@ -50,7 +47,7 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number }
 
 interface Classification { level: SensitivityLevel; allowed: string[] }
 
-// Reversible ops (can be used on HIGH_SENSITIVE): TOKENIZE, AES256_GCM96, FF3_1
+// Reversible ops (allowed for HIGH_SENSITIVE): TOKENIZE, AES256_GCM96, FF3_1
 // One-way ops (MEDIUM+): MASK, HMAC, HMAC_SHA512, MASK_TEMPLATE
 const CLASSIFICATION: Record<string, Classification> = {
   ssn:             { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE", "AES256_GCM96", "FF3_1"] },
@@ -76,98 +73,35 @@ const UNCLASSIFIED: Classification = {
   allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"],
 };
 
-// ── Helpers ────────────────────────────────────────────────────────
-
 function classify(fieldType: string): Classification {
   return CLASSIFICATION[fieldType.toLowerCase()] ?? UNCLASSIFIED;
 }
 
-/** Redact a token string — show prefix only for debug context. */
 function redactToken(token: string): string {
   if (token.length <= 8) return "[REDACTED]";
   return `${token.substring(0, 8)}…[REDACTED]`;
 }
 
-// ── Sandbox crypto implementations ─────────────────────────────────
+// ── Valid operations ────────────────────────────────────────────────
 
-/**
- * HMAC-SHA-512: Deterministic one-way hash using SHA-512.
- * Output: 128-char hex digest.
- */
-function sandboxHmacSha512(value: string): string {
-  return createHmac("sha512", SANDBOX_HMAC_512_KEY).update(value).digest("hex");
-}
+const VALID_OPS = [
+  "TOKENIZE", "MASK", "HMAC", "DETOKENIZE",
+  "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE",
+] as const;
+type ValidOp = (typeof VALID_OPS)[number];
 
-/**
- * AES-256-GCM96: Authenticated encryption.
- * Format: <base64url_iv>.<base64url_ciphertext>.<base64url_authtag>
- * 96-bit (12-byte) nonce, 256-bit key, 128-bit auth tag.
- */
-function sandboxAes256Gcm96(value: string): string {
-  const iv = randomBytes(12); // 96-bit nonce
-  const cipher = createCipheriv("aes-256-gcm", SANDBOX_AES_KEY, iv);
-  const enc = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-  const tag = cipher.getAuthTag(); // 128-bit auth tag
-  return [
-    iv.toString("base64url"),
-    enc.toString("base64url"),
-    tag.toString("base64url"),
-  ].join(".");
-}
+// ── Operation display metadata for the response ────────────────────
 
-/**
- * FF3-1 Sandbox: Format-Preserving Encryption simulation.
- * Preserves digit→digit, uppercase→uppercase, lowercase→lowercase, separators→separators.
- * Uses a deterministic key-derived permutation per character class.
- *
- * NOTE: This is a sandbox simulation (Feistel-like substitution), NOT the full
- * NIST SP 800-38G FF3-1 specification. Use a compliant library (e.g. Vault Transit FPE) in production.
- */
-function sandboxFf31(value: string): string {
-  const DIGITS = "0123456789";
-  const UPPER  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const LOWER  = "abcdefghijklmnopqrstuvwxyz";
-
-  // Derive a deterministic permutation seed from key + value (convergent FPE property)
-  const seed = createHmac("sha256", SANDBOX_FF31_KEY).update(value).digest();
-  let si = 0;
-  const nextShift = () => seed[si++ % 32];
-
-  return [...value].map((ch) => {
-    if (DIGITS.includes(ch))
-      return DIGITS[(DIGITS.indexOf(ch) + nextShift()) % 10];
-    if (UPPER.includes(ch))
-      return UPPER[(UPPER.indexOf(ch) + nextShift()) % 26];
-    if (LOWER.includes(ch))
-      return LOWER[(LOWER.indexOf(ch) + nextShift()) % 26];
-    return ch; // preserve separators / special chars
-  }).join("");
-}
-
-/**
- * MASKING TEMPLATE: Apply a user-supplied template pattern.
- *   '#' → reveal the character at this position (pass-through)
- *   '*' → mask the character at this position (replace with '*')
- *   any other char → literal separator (inserted, does not consume input)
- *
- * Example: template "####-****-****-####" on "1234567890123456"
- *          → "1234-****-****-3456"
- */
-function applyMaskTemplate(value: string, template: string): string {
-  let out = "";
-  let vi = 0;
-  for (const tc of template) {
-    if (tc === "#") {
-      out += vi < value.length ? value[vi++] : "#";
-    } else if (tc === "*") {
-      out += "*";
-      if (vi < value.length) vi++;
-    } else {
-      out += tc; // literal separator
-    }
-  }
-  return out;
-}
+const OP_ALGORITHM: Record<string, string> = {
+  TOKENIZE:      "Convergent tokenization (AES-256-GCM96 via OpenBao Transit)",
+  MASK:          "Field-type aware masking",
+  HMAC:          "HMAC-SHA-256 (OpenBao Transit)",
+  DETOKENIZE:    "Decryption (AES-256-GCM96 via OpenBao Transit)",
+  HMAC_SHA512:   "HMAC-SHA-512 (OpenBao Transit, algorithm=sha2-512)",
+  AES256_GCM96:  "AES-256-GCM, 96-bit nonce (OpenBao Transit, dedicated key)",
+  FF3_1:         "Format-Preserving Encryption / FF3-1 (OpenBao Transit FPE key)",
+  MASK_TEMPLATE: "Custom masking template (engine-side, # = reveal · * = mask)",
+};
 
 // ── Route handler ──────────────────────────────────────────────────
 
@@ -211,13 +145,6 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
-
-  const VALID_OPS = [
-    "TOKENIZE", "MASK", "HMAC", "DETOKENIZE",
-    "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE",
-  ] as const;
-  type ValidOp = (typeof VALID_OPS)[number];
-
   if (!VALID_OPS.includes(operation as ValidOp)) {
     return NextResponse.json(
       { error: `Invalid operation. Must be one of: ${VALID_OPS.join(", ")}` },
@@ -227,11 +154,10 @@ export async function POST(req: NextRequest) {
 
   const op = operation as ValidOp;
 
-  // MASK_TEMPLATE requires a template string
   if (op === "MASK_TEMPLATE") {
     if (typeof mask_template !== "string" || mask_template.trim().length === 0) {
       return NextResponse.json(
-        { error: "mask_template must be a non-empty string for MASK_TEMPLATE operation (e.g. '####-****-####')" },
+        { error: "mask_template is required for MASK_TEMPLATE (e.g. '####-****-####')" },
         { status: 400 },
       );
     }
@@ -255,7 +181,7 @@ export async function POST(req: NextRequest) {
   const startMs = Date.now();
 
   try {
-    // ── 6a. DETOKENIZE ───────────────────────────────────────────────
+    // ── 6a. DETOKENIZE — reverse-lookup in engine ────────────────────
     if (op === "DETOKENIZE") {
       const engineRes = await fetch(`${TNT_URL}/api/v1/detokenize`, {
         method: "POST",
@@ -280,6 +206,7 @@ export async function POST(req: NextRequest) {
         cached: false,
         classification: classification.level,
         allowed_operations: classification.allowed,
+        algorithm: OP_ALGORITHM["DETOKENIZE"],
         latency_ms: latency,
         trace_id: null,
         sandbox: true,
@@ -294,142 +221,24 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ── 6b. HMAC-SHA-512 (BFF sandbox) ──────────────────────────────
-    if (op === "HMAC_SHA512") {
-      const digest = sandboxHmacSha512(value.trim());
-      const latency = Date.now() - startMs;
-      return NextResponse.json({
-        operation: "HMAC_SHA512",
-        field_type: fieldType,
-        output_value: digest,
-        cached: false,
-        classification: classification.level,
-        allowed_operations: classification.allowed,
-        latency_ms: latency,
-        trace_id: null,
-        sandbox: true,
-        algorithm: "HMAC-SHA-512",
-        digest_bits: 512,
-        raw_request: {
-          field: fieldType,
-          transformation: "HMAC_SHA512",
-          tenant_id: SANDBOX_TENANT,
-          value: "[REDACTED — not sent to client]",
-        },
-        raw_response: {
-          algorithm: "HMAC-SHA-512",
-          digest_length: digest.length,
-          cached: false,
-        },
-      });
-    }
+    // ── 6b. All other operations — delegated to T&T Engine ───────────
+    // Engine handles: TOKENIZE, MASK, HMAC, HMAC_SHA512, AES256_GCM96, FF3_1, MASK_TEMPLATE
+    // Audit log is written by the engine for every operation.
 
-    // ── 6c. AES-256-GCM96 (BFF sandbox) ─────────────────────────────
-    if (op === "AES256_GCM96") {
-      const ciphertext = sandboxAes256Gcm96(value.trim());
-      const latency = Date.now() - startMs;
-      return NextResponse.json({
-        operation: "AES256_GCM96",
-        field_type: fieldType,
-        output_value: ciphertext,
-        cached: false,
-        classification: classification.level,
-        allowed_operations: classification.allowed,
-        latency_ms: latency,
-        trace_id: null,
-        sandbox: true,
-        algorithm: "AES-256-GCM",
-        nonce_bits: 96,
-        auth_tag_bits: 128,
-        format: "<iv_b64url>.<ciphertext_b64url>.<authtag_b64url>",
-        raw_request: {
-          field: fieldType,
-          transformation: "AES256_GCM96",
-          tenant_id: SANDBOX_TENANT,
-          value: "[REDACTED — not sent to client]",
-        },
-        raw_response: {
-          algorithm: "AES-256-GCM",
-          nonce_bits: 96,
-          auth_tag_bits: 128,
-          cached: false,
-        },
-      });
-    }
-
-    // ── 6d. FF3-1 Format-Preserving Encryption (BFF sandbox) ─────────
-    if (op === "FF3_1") {
-      const fpeValue = sandboxFf31(value.trim());
-      const latency = Date.now() - startMs;
-      return NextResponse.json({
-        operation: "FF3_1",
-        field_type: fieldType,
-        output_value: fpeValue,
-        cached: false,
-        classification: classification.level,
-        allowed_operations: classification.allowed,
-        latency_ms: latency,
-        trace_id: null,
-        sandbox: true,
-        algorithm: "FF3-1 (NIST SP 800-38G) — sandbox simulation",
-        note: "Sandbox uses a Feistel-like substitution. Production uses a fully compliant FF3-1 implementation via Vault Transit FPE.",
-        raw_request: {
-          field: fieldType,
-          transformation: "FF3_1",
-          tenant_id: SANDBOX_TENANT,
-          value: "[REDACTED — not sent to client]",
-        },
-        raw_response: {
-          algorithm: "FF3-1",
-          format_preserved: true,
-          cached: false,
-        },
-      });
-    }
-
-    // ── 6e. MASKING TEMPLATE (BFF sandbox) ───────────────────────────
+    const enginePayload: Record<string, unknown> = {
+      value: value.trim(),
+      field: fieldType,
+      transformation: op,
+      tenant_id: SANDBOX_TENANT,
+    };
     if (op === "MASK_TEMPLATE") {
-      const tmpl = (mask_template as string).trim();
-      const masked = applyMaskTemplate(value.trim(), tmpl);
-      const latency = Date.now() - startMs;
-      return NextResponse.json({
-        operation: "MASK_TEMPLATE",
-        field_type: fieldType,
-        output_value: masked,
-        cached: false,
-        classification: classification.level,
-        allowed_operations: classification.allowed,
-        latency_ms: latency,
-        trace_id: null,
-        sandbox: true,
-        mask_template: tmpl,
-        template_legend: "# = reveal character  |  * = mask character  |  other = literal separator",
-        raw_request: {
-          field: fieldType,
-          transformation: "MASK_TEMPLATE",
-          mask_template: tmpl,
-          tenant_id: SANDBOX_TENANT,
-          value: "[REDACTED — not sent to client]",
-        },
-        raw_response: {
-          template: tmpl,
-          cached: false,
-        },
-      });
+      enginePayload.mask_template = (mask_template as string).trim();
     }
-
-    // ── 6f. TOKENIZE | MASK | HMAC path (proxied to T&T Engine) ──────
-    const transformation = op; // MASK→MASK, HMAC→HMAC, TOKENIZE→TOKENIZE
 
     const engineRes = await fetch(`${TNT_URL}/api/v1/tokenize`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        value: value.trim(),
-        field: fieldType,
-        transformation,
-        tenant_id: SANDBOX_TENANT,
-      }),
+      body: JSON.stringify(enginePayload),
       signal: AbortSignal.timeout(10_000),
     });
     const latency = Date.now() - startMs;
@@ -442,6 +251,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const rawRequest: Record<string, unknown> = {
+      field: fieldType,
+      transformation: op,
+      tenant_id: SANDBOX_TENANT,
+      value: "[REDACTED — not sent to client]",
+    };
+    if (op === "MASK_TEMPLATE") {
+      rawRequest.mask_template = (mask_template as string).trim();
+    }
+
     return NextResponse.json({
       operation: op,
       field_type: fieldType,
@@ -449,15 +268,11 @@ export async function POST(req: NextRequest) {
       cached: Boolean(resBody.cached),
       classification: classification.level,
       allowed_operations: classification.allowed,
+      algorithm: OP_ALGORITHM[op] ?? op,
       latency_ms: latency,
       trace_id: null,
       sandbox: true,
-      raw_request: {
-        field: fieldType,
-        transformation,
-        tenant_id: SANDBOX_TENANT,
-        value: "[REDACTED — not sent to client]",
-      },
+      raw_request: rawRequest,
       raw_response: {
         token: resBody.token,
         field: resBody.field,

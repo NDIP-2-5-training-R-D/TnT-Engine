@@ -629,10 +629,13 @@ export default function PlaygroundPage() {
                 <div className="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 col-span-2">
                   <div className="flex items-center gap-1.5 text-xs text-slate-500">
                     <Server className="w-3 h-3" />
-                    {["HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"].includes(result.operation)
-                      ? "BFF sandbox computation · not forwarded to engine"
-                      : "Sandbox tenant · token not in production DB"}
+                    Engine processed · Audit log written · Sandbox tenant
                   </div>
+                  {(result as Record<string, unknown>).algorithm && (
+                    <p className="text-[10px] text-slate-600 mt-1 font-mono truncate">
+                      {String((result as Record<string, unknown>).algorithm)}
+                    </p>
+                  )}
                 </div>
               </div>
 

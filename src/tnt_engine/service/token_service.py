@@ -35,6 +35,7 @@ from tnt_engine.cache.layered import LayeredCache
 from tnt_engine.config import Settings
 from tnt_engine.crypto.interface import EncryptionService, HMACService
 from tnt_engine.db.repository import TokenRepository
+from tnt_engine.service.masking import apply_mask_template
 
 if TYPE_CHECKING:
     from tnt_engine.service.audit_writer import ReliableAuditWriter
@@ -52,6 +53,7 @@ from tnt_engine.models.domain import (
     TokenizeResponse,
     TokenRecord,
     TokenStatus,
+    Transformation,
 )
 from tnt_engine.tracing import ensure_trace_id, get_trace_id
 
@@ -103,6 +105,17 @@ class TokenService:
 
     async def tokenize(self, req: TokenizeRequest) -> TokenizeResponse:
         ensure_trace_id()
+
+        # ── Dispatch one-shot transformations (no DB storage, with audit) ──
+        if req.transformation == Transformation.HMAC_SHA512:
+            return await self._do_hmac_sha512(req)
+        if req.transformation == Transformation.AES256_GCM96:
+            return await self._do_aes256_gcm96(req)
+        if req.transformation == Transformation.FF3_1:
+            return await self._do_ff3_1(req)
+        if req.transformation == Transformation.MASK_TEMPLATE:
+            return await self._do_mask_template(req)
+
         t0 = time.monotonic()
         try:
             # Idempotency check
@@ -164,6 +177,79 @@ class TokenService:
         except Exception:
             ERRORS.labels(operation="tokenize").inc()
             logger.exception("tokenize_failed", field=req.field, tenant_id=req.tenant_id)
+            raise
+
+    # ------------------------------------------------------------------
+    # One-shot advanced transformations (audit only, no DB storage)
+    # ------------------------------------------------------------------
+
+    async def _do_hmac_sha512(self, req: TokenizeRequest) -> TokenizeResponse:
+        """HMAC-SHA-512 via Transit. Returns 128-char hex digest in token field."""
+        t0 = time.monotonic()
+        try:
+            normalized = self._normalize(req.value)
+            digest = await self._hmac.hmac_sha512(normalized)
+            TOKENIZE_LATENCY.observe(time.monotonic() - t0)
+            self._fire_audit(AuditAction.HMAC_SHA512, req.field, req.tenant_id)
+            return TokenizeResponse(token=digest, field=req.field, cached=False)
+        except Exception:
+            ERRORS.labels(operation="hmac_sha512").inc()
+            logger.exception("hmac_sha512_failed", field=req.field, tenant_id=req.tenant_id)
+            raise
+
+    async def _do_aes256_gcm96(self, req: TokenizeRequest) -> TokenizeResponse:
+        """AES-256-GCM96 encryption via dedicated Transit key.
+
+        Returns ciphertext in token field (format: vault:vN:<b64> for OpenBao,
+        or <iv>.<ct>.<tag> base64url for sandbox).
+        """
+        t0 = time.monotonic()
+        try:
+            normalized = self._normalize(req.value)
+            ciphertext, _ = await self._encryption.encrypt_aes256_gcm96(normalized)
+            TOKENIZE_LATENCY.observe(time.monotonic() - t0)
+            self._fire_audit(AuditAction.AES256_GCM96, req.field, req.tenant_id)
+            return TokenizeResponse(token=ciphertext, field=req.field, cached=False)
+        except Exception:
+            ERRORS.labels(operation="aes256_gcm96").inc()
+            logger.exception("aes256_gcm96_failed", field=req.field, tenant_id=req.tenant_id)
+            raise
+
+    async def _do_ff3_1(self, req: TokenizeRequest) -> TokenizeResponse:
+        """FF3-1 Format-Preserving Encryption.
+
+        Returns format-preserved encrypted string in token field.
+        """
+        t0 = time.monotonic()
+        try:
+            normalized = self._normalize(req.value)
+            fpe_output = await self._encryption.fpe_ff31(normalized)
+            TOKENIZE_LATENCY.observe(time.monotonic() - t0)
+            self._fire_audit(AuditAction.FF3_1, req.field, req.tenant_id)
+            return TokenizeResponse(token=fpe_output, field=req.field, cached=False)
+        except Exception:
+            ERRORS.labels(operation="ff3_1").inc()
+            logger.exception("ff3_1_failed", field=req.field, tenant_id=req.tenant_id)
+            raise
+
+    async def _do_mask_template(self, req: TokenizeRequest) -> TokenizeResponse:
+        """Custom masking template: # = reveal, * = mask, other = literal separator."""
+        t0 = time.monotonic()
+        try:
+            if not req.mask_template:
+                raise ValueError("mask_template is required for MASK_TEMPLATE transformation")
+            masked = apply_mask_template(req.value, req.mask_template)
+            TOKENIZE_LATENCY.observe(time.monotonic() - t0)
+            self._fire_audit(
+                AuditAction.MASK_TEMPLATE,
+                req.field,
+                req.tenant_id,
+                template=req.mask_template,
+            )
+            return TokenizeResponse(token=masked, field=req.field, cached=False)
+        except Exception:
+            ERRORS.labels(operation="mask_template").inc()
+            logger.exception("mask_template_failed", field=req.field, tenant_id=req.tenant_id)
             raise
 
     # ------------------------------------------------------------------

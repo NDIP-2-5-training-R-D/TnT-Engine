@@ -10,6 +10,10 @@ class Transformation(str, enum.Enum):
     TOKENIZE = "TOKENIZE"
     HMAC = "HMAC"
     MASK = "MASK"
+    HMAC_SHA512 = "HMAC_SHA512"       # One-way HMAC-SHA-512 digest (via Transit)
+    AES256_GCM96 = "AES256_GCM96"     # Authenticated encryption, 96-bit nonce (via Transit)
+    FF3_1 = "FF3_1"                   # Format-Preserving Encryption NIST SP 800-38G (via Transit FPE key)
+    MASK_TEMPLATE = "MASK_TEMPLATE"   # Custom masking template: # = reveal, * = mask
 
 
 class TokenStatus(str, enum.Enum):
@@ -26,6 +30,10 @@ class AuditAction(str, enum.Enum):
     REVOKE = "REVOKE"
     DELETE = "DELETE"
     REENCRYPT = "REENCRYPT"
+    HMAC_SHA512 = "HMAC_SHA512"
+    AES256_GCM96 = "AES256_GCM96"
+    FF3_1 = "FF3_1"
+    MASK_TEMPLATE = "MASK_TEMPLATE"
 
 
 # ── Request / Response models ────────────────────────────────────────
@@ -37,6 +45,7 @@ class TokenizeRequest(BaseModel):
     transformation: Transformation = Transformation.TOKENIZE
     tenant_id: str = Field(..., min_length=1)
     ttl_seconds: int | None = None
+    mask_template: str | None = None  # Required when transformation=MASK_TEMPLATE
 
 
 class TokenizeResponse(BaseModel):
