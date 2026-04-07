@@ -64,6 +64,16 @@ class CircuitBreakerBackend(CryptoBackend):
             await self._on_failure()
             raise exc
 
+    async def hmac_sha512(self, plaintext: str, key_name: str | None = None) -> str:
+        await self._check_state()
+        try:
+            result = await self._backend.hmac_sha512(plaintext, key_name)
+            await self._on_success()
+            return result
+        except Exception as exc:
+            await self._on_failure()
+            raise exc
+
     # ── EncryptionService ────────────────────────────────────────────
 
     async def encrypt(self, plaintext: str, key_name: str | None = None) -> tuple[str, int]:
@@ -80,6 +90,28 @@ class CircuitBreakerBackend(CryptoBackend):
         await self._check_state()
         try:
             result = await self._backend.decrypt(ciphertext, key_version, key_name)
+            await self._on_success()
+            return result
+        except Exception as exc:
+            await self._on_failure()
+            raise exc
+
+    async def encrypt_aes256_gcm96(
+        self, plaintext: str, key_name: str | None = None
+    ) -> tuple[str, int]:
+        await self._check_state()
+        try:
+            result = await self._backend.encrypt_aes256_gcm96(plaintext, key_name)
+            await self._on_success()
+            return result
+        except Exception as exc:
+            await self._on_failure()
+            raise exc
+
+    async def fpe_ff31(self, plaintext: str, key_name: str | None = None) -> str:
+        await self._check_state()
+        try:
+            result = await self._backend.fpe_ff31(plaintext, key_name)
             await self._on_success()
             return result
         except Exception as exc:
