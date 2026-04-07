@@ -31,4 +31,22 @@ echo "[init-openbao] Creating tnt-hmac..."
 curl -sf -X POST "${VAULT_ADDR}/v1/transit/keys/tnt-hmac" \
     -H "X-Vault-Token: ${VAULT_TOKEN}" 2>/dev/null || echo "[init-openbao] tnt-hmac already exists."
 
+echo "[init-openbao] Creating tnt-aes-gcm (AES-256-GCM96, for AES256_GCM96 transformation)..."
+curl -sf -X POST "${VAULT_ADDR}/v1/transit/keys/tnt-aes-gcm" \
+    -H "X-Vault-Token: ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"type":"aes256-gcm96"}' 2>/dev/null || echo "[init-openbao] tnt-aes-gcm already exists."
+
+echo "[init-openbao] Creating tnt-fpe (AES-256-GCM96, for FF3_1 / Format-Preserving Encryption)..."
+curl -sf -X POST "${VAULT_ADDR}/v1/transit/keys/tnt-fpe" \
+    -H "X-Vault-Token: ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"type":"aes256-gcm96"}' 2>/dev/null || echo "[init-openbao] tnt-fpe already exists."
+
 echo "[init-openbao] Done. Transit keys ready."
+echo ""
+echo "[init-openbao] Keys provisioned:"
+echo "  tnt-key      — Convergent tokenization (TOKENIZE)"
+echo "  tnt-hmac     — HMAC-SHA-256 / HMAC-SHA-512 (HMAC, HMAC_SHA512)"
+echo "  tnt-aes-gcm  — AES-256-GCM96 authenticated encryption (AES256_GCM96)"
+echo "  tnt-fpe      — Format-Preserving Encryption key material (FF3_1)"
