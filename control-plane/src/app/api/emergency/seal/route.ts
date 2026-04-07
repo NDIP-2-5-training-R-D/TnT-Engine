@@ -70,6 +70,11 @@ export async function POST(request: NextRequest) {
     });
 
     if (res.status === 204 || res.ok) {
+      const { logCpAction } = await import("@/lib/cp-audit");
+      const { emitCpEvent } = await import("@/lib/event-bus");
+      logCpAction({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "success" });
+      emitCpEvent({ type: "SEAL", performed_by: auth.user!.username, result: "success" });
+
       return NextResponse.json({
         success: true,
         message: "OpenBao has been SEALED. All crypto operations are now disabled.",
@@ -77,11 +82,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const { logCpAction: log } = await import("@/lib/cp-audit");
+    log({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "failure", detail: `HTTP ${res.status}` });
     return NextResponse.json(
       { success: false, message: `Seal failed: HTTP ${res.status}`, sealed: false },
       { status: 502 }
     );
   } catch (err) {
+    const { logCpAction: log } = await import("@/lib/cp-audit");
+    log({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "failure", detail: String(err) });
     return NextResponse.json(
       { success: false, message: `Seal request failed: ${err}`, sealed: false },
       { status: 502 }

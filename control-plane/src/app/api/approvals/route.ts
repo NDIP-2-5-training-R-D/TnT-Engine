@@ -57,6 +57,10 @@ export async function POST(request: NextRequest) {
     }
 
     const req = createApproval(action, target, auth.user!.username, auth.user!.role, reason);
+    const { logCpAction } = await import("@/lib/cp-audit");
+    const { emitCpEvent } = await import("@/lib/event-bus");
+    logCpAction({ action: "APPROVAL_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target, result: "success", detail: `action=${action} reason=${reason}` });
+    emitCpEvent({ type: "APPROVAL_CREATE", performed_by: auth.user!.username, target, result: "success", detail: action });
     return NextResponse.json({ success: true, message: "Approval request created", request: req });
   }
 
@@ -79,6 +83,10 @@ export async function POST(request: NextRequest) {
     if (decision === "approved" && result.request) {
       const execResult = await executeApprovedAction(result.request.action, result.request.target);
       markExecuted(result.request.id);
+      const { logCpAction } = await import("@/lib/cp-audit");
+      const { emitCpEvent } = await import("@/lib/event-bus");
+      logCpAction({ action: "APPROVAL_REVIEW", performed_by: auth.user!.username, role: auth.user!.role, target: result.request.target, result: execResult.success ? "success" : "failure", detail: `decision=approved action=${result.request.action} ${execResult.message}` });
+      emitCpEvent({ type: "APPROVAL_REVIEW", performed_by: auth.user!.username, target: result.request.target, result: execResult.success ? "success" : "failure", detail: `approved: ${result.request.action}` });
       return NextResponse.json({
         success: true,
         message: `Request approved and executed: ${execResult.message}`,
@@ -86,6 +94,10 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const { logCpAction: log } = await import("@/lib/cp-audit");
+    const { emitCpEvent: emit } = await import("@/lib/event-bus");
+    log({ action: "APPROVAL_REVIEW", performed_by: auth.user!.username, role: auth.user!.role, target: result.request?.target, result: "success", detail: `decision=rejected` });
+    emit({ type: "APPROVAL_REVIEW", performed_by: auth.user!.username, result: "success", detail: "rejected" });
     return NextResponse.json({
       success: true,
       message: `Request ${decision}`,

@@ -98,6 +98,11 @@ export async function POST(request: NextRequest) {
         duration_ms: Date.now() - t0,
       });
 
+      const { logCpAction } = await import("@/lib/cp-audit");
+      const { emitCpEvent } = await import("@/lib/event-bus");
+      logCpAction({ action: "BACKUP_TRIGGER", performed_by: auth.user!.username, role: auth.user!.role, result: "success", detail: `${(buffer.length / 1024).toFixed(1)} KB sha256=${checksum.slice(0, 8)}...` });
+      emitCpEvent({ type: "BACKUP_TRIGGER", performed_by: auth.user!.username, result: "success", detail: `${(buffer.length / 1024).toFixed(1)} KB` });
+
       return NextResponse.json({ success: true, backup: record });
     } catch (err) {
       const record = recordBackup({

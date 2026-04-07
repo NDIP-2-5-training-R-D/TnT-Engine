@@ -100,10 +100,11 @@ export async function POST(request: NextRequest) {
   try {
     const result = await submitUnsealKey(body.key);
 
-    // Log the unseal attempt (reason is recorded, key is NOT)
-    console.log(
-      `[AUDIT] Unseal attempt | sealed=${result.sealed} | progress=${result.progress}/${result.t} | reason="${body.reason}"`
-    );
+    const { logCpAction } = await import("@/lib/cp-audit");
+    const { emitCpEvent } = await import("@/lib/event-bus");
+    const unsealed = !result.sealed;
+    logCpAction({ action: "UNSEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "success", detail: unsealed ? "Vault fully unsealed" : `progress=${result.progress}/${result.t} reason=${body.reason}` });
+    if (unsealed) emitCpEvent({ type: "UNSEAL", performed_by: auth.user!.username, result: "success", detail: "Vault fully unsealed" });
 
     return NextResponse.json({
       success: true,

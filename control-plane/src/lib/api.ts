@@ -48,6 +48,9 @@ export async function rotateKey(keyName: string): Promise<MutationResponse> {
     },
     body: JSON.stringify({ key_name: keyName, confirm: `ROTATE-${keyName}` }),
   });
+  if (!res.ok && res.headers.get("content-type")?.includes("application/json") === false) {
+    return { success: false, message: `Server error: HTTP ${res.status}` };
+  }
   return res.json();
 }
 
