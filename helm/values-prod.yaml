@@ -6,10 +6,10 @@ replicaCount: 3
 resources:
   requests:
     cpu: 500m
-    memory: 512Mi
+    memory: 128Mi  # Điều chỉnh từ 512Mi: thực tế app chỉ dùng ~94MB (đo qua docker stats, soak test 300k requests)
   limits:
     cpu: "2"
-    memory: "1Gi"
+    memory: 256Mi  # Điều chỉnh từ 1Gi: buffer 2.5x so với thực tế sử dụng
 
 autoscaling:
   enabled: true

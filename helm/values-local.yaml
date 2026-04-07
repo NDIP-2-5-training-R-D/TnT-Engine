@@ -1,0 +1,66 @@
+# Local K8s (Docker Desktop) — dùng docker-compose services qua host.docker.internal
+
+replicaCount: 2
+
+image:
+  repository: tnt-engine-tnt-engine
+  tag: latest
+  pullPolicy: Never   # dùng local image, không pull từ registry
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+pdb:
+  enabled: false
+
+service:
+  type: LoadBalancer
+  port: 8000
+  targetPort: 8000
+
+ingress:
+  enabled: false
+
+networkPolicy:
+  enabled: false
+
+externalSecrets:
+  enabled: false
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+secrets:
+  TNT_DB_USER: "tnt"
+  TNT_DB_PASSWORD: "tnt_secret"
+  TNT_CRYPTO_TOKEN: "dev-token"
+
+config:
+  TNT_DB_HOST: "host.docker.internal"
+  TNT_DB_PORT: "5432"
+  TNT_DB_NAME: "tnt_engine"
+  TNT_DB_POOL_MIN: "5"
+  TNT_DB_POOL_MAX: "20"
+  TNT_REDIS_URL: "redis://host.docker.internal:6379/0"
+  TNT_CRYPTO_BASE_URL: "http://host.docker.internal:8200/v1"
+  TNT_VAULT_AUTH_METHOD: "static"
+  TNT_CRYPTO_BACKEND: "openbao"
+  TNT_CRYPTO_VERIFY_SSL: "false"
+  TNT_ENVIRONMENT: "development"
+  TNT_L1_MAX_SIZE: "1000"
