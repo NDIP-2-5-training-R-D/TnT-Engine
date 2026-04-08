@@ -59,9 +59,9 @@ export async function GET(request: NextRequest) {
     }
   } catch { /* ignore — entries stay empty */ }
 
-  // 3. Fetch CP audit entries from local store
+  // 3. Fetch CP audit entries from configured store
   const { listCpAudit } = await import("@/lib/cp-audit");
-  const cpEntries = listCpAudit(parseInt(limit));
+  const cpEntries = await listCpAudit(parseInt(limit));
 
   return NextResponse.json({
     buffer_size: bufferSize,

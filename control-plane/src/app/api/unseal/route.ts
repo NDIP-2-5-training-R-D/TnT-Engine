@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
 
     const { logCpAction } = await import("@/lib/cp-audit");
     const unsealed = !result.sealed;
-    logCpAction({
+    await logCpAction({
       action: "UNSEAL",
       performed_by: auth.user!.username,
       role: auth.user!.role,

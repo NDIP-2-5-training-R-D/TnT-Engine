@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     const result = await initVault(shares, threshold);
 
     const { logCpAction } = await import("@/lib/cp-audit");
-    logCpAction({ action: "VAULT_INIT", performed_by: auth.user!.username, role: auth.user!.role, result: "success", detail: `shares=${shares} threshold=${threshold}` });
+    await logCpAction({ action: "VAULT_INIT", performed_by: auth.user!.username, role: auth.user!.role, result: "success", detail: `shares=${shares} threshold=${threshold}` });
 
     // Return keys — the UI must display these ONCE and warn to save them
     return NextResponse.json({

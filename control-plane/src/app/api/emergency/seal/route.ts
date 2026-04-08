@@ -71,7 +71,7 @@ export async function POST(request: NextRequest) {
 
     if (res.status === 204 || res.ok) {
       const { logCpAction } = await import("@/lib/cp-audit");
-      logCpAction({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "success" });
+      await logCpAction({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "success" });
 
       return NextResponse.json({
         success: true,
@@ -81,14 +81,14 @@ export async function POST(request: NextRequest) {
     }
 
     const { logCpAction: log } = await import("@/lib/cp-audit");
-    log({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "failure", detail: `HTTP ${res.status}` });
+    await log({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "failure", detail: `HTTP ${res.status}` });
     return NextResponse.json(
       { success: false, message: `Seal failed: HTTP ${res.status}`, sealed: false },
       { status: 502 }
     );
   } catch (err) {
     const { logCpAction: log } = await import("@/lib/cp-audit");
-    log({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "failure", detail: String(err) });
+    await log({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "failure", detail: String(err) });
     return NextResponse.json(
       { success: false, message: `Seal request failed: ${err}`, sealed: false },
       { status: 502 }

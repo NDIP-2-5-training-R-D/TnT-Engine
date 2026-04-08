@@ -1,7 +1,7 @@
 # Load Test Report — TnT Engine
 
-**Date:** 2026-04-07
-**Tool:** [hey](https://github.com/rakyll/hey)
+**Date:** 2026-04-08
+**Tool:** `hey` / `wrk` (tùy môi trường)
 
 ---
 
@@ -172,15 +172,93 @@
 
 ---
 
+## Lần 3 — Docker trên VM GEIC
+
+**Environment:** Docker Compose trên VM GEIC, tất cả services chạy cùng VM  
+**Target:** `POST http://localhost:8000/api/v1/tokenize`  
+**Tool:** `wrk`  
+**Lưu ý:** Đây là số liệu trên VM thật, nhưng vẫn chưa phải benchmark production-like qua K8s + Ingress/LB. Benchmark K8s sẽ chỉ được cập nhật sau khi hoàn tất toàn bộ flow triển khai và kiểm tra dependency trong cluster.
+
+### Baseline
+
+| Chỉ số | Giá trị |
+|--------|---------|
+| Requests/sec | 871.50 |
+| Average | 9.73ms |
+| Max | 193.92ms |
+| Success rate | ~100% |
+
+**Peak resource quan sát được:**
+- `tnt-engine`: CPU ~122.64%, RAM ~90.36 MiB
+
+### Load
+
+| Chỉ số | Giá trị |
+|--------|---------|
+| Requests/sec | 716.68 |
+| Average | 140.58ms |
+| Max | 820.47ms |
+| Success rate | ~100% |
+
+**Peak resource quan sát được:**
+- `tnt-engine`: CPU ~112.98%, RAM ~107.5 MiB
+- Từ raw `docker stats` log:
+  `openbao` ~30-31 MiB, `postgres` ~106-107 MiB, `redis` ~4.5-5.5 MiB
+
+### Spike
+
+| Chỉ số | Giá trị |
+|--------|---------|
+| Requests/sec | 4,661.68 |
+| Average | 243.66ms |
+| Max | 1.95s |
+| Timeout | 172 |
+| Non-2xx/3xx | 133,762 |
+| Success rate | ~4.5% |
+
+**Peak resource quan sát được:**
+- `tnt-engine`: CPU ~101.93%, RAM ~107.5 MiB
+
+### Soak
+
+| Chỉ số | Giá trị |
+|--------|---------|
+| Requests/sec | 789.62 |
+| Average | 60.78ms |
+| Max | 205.07ms |
+| Success rate | ~100% |
+
+**Peak resource quan sát được:**
+- `tnt-engine`: CPU ~131.26%, RAM ~110.2 MiB
+
+### Tổng hợp Lần 3
+
+| Test | Concurrent | Req/s | Average | Success |
+|------|-----------|-------|---------|---------|
+| Baseline | 10 | 871.50 | 9.73ms | ~100% |
+| Load | 100 | 716.68 | 140.58ms | ~100% |
+| Spike | 500 | 4,661.68 | 243.66ms | ~4.5% |
+| Soak | 50 | 789.62 | 60.78ms | ~100% |
+
+**Nhận xét:** Benchmark trên VM xác nhận app ổn ở tải baseline/load/soak, nhưng spike vẫn shed/lỗi rất mạnh. Peak RAM của riêng `tnt-engine` trên VM lên khoảng `90-110 MiB`, nên chưa có cơ sở hạ memory production xuống mức quá sát ngưỡng.
+
+---
+
 ## Phạm vi áp dụng của kết quả hiện tại
 
 Các số liệu trong tài liệu này mới phản ánh:
 
 - Docker Compose local.
 - Kubernetes local.
+- Docker Compose trên VM GEIC.
 - Truy cập qua `localhost` hoặc `kubectl port-forward`.
 
-Các số liệu này **chưa đủ cơ sở để chốt production sizing** vì còn thiếu:
+**Chưa bao gồm:**
+
+- benchmark qua K8s + Ingress trên VM GEIC
+- benchmark với full dependency path hoàn chỉnh trong cluster
+
+Các số liệu này **đã tốt hơn local-only**, nhưng vẫn chưa đủ cơ sở để chốt production sizing vì còn thiếu:
 
 - network thật giữa app, OpenBao, PostgreSQL, Redis;
 - ingress/load balancer thật;
@@ -222,23 +300,25 @@ Các số liệu này **chưa đủ cơ sở để chốt production sizing** v�
 
 ## Kết luận tạm thời
 
-### Điều đã quan sát được trong môi trường local
-- Ổn định 100% ở tải bình thường (≤100 concurrent) trong local test.
-- Chưa thấy dấu hiệu memory leak trong soak test local 300k requests.
-- Backpressure hoạt động đúng trong điều kiện local overload.
-- Deploy thành công lên K8s local, health check pass.
+### Điều đã quan sát được từ local + VM
+- Ổn định ở tải bình thường trong local test và VM test.
+- Chưa thấy dấu hiệu memory leak rõ ràng trong soak test local và VM.
+- Backpressure hoạt động đúng theo hướng bảo vệ hệ thống khi overload.
+- Benchmark trên VM cho số liệu thực tế hơn local laptop.
 
 ### Giả thuyết cần xác nhận thêm trên VM/cluster thật
 - Ngưỡng backpressure `200 concurrent` có thể hợp lý cho HTTP request/response thông thường.
-- Throughput local của 1 pod đang nằm khoảng `~1,100–1,235 req/s`.
-- OpenBao có khả năng là bottleneck chính, nhưng cần đo lại khi tách hạ tầng thật.
+- Throughput trên VM của 1 instance hiện nằm khoảng `~700–870 req/s` ở baseline/load/soak.
+- Spike trên VM cho success rate rất thấp (`~4.5%`), nên cần đo tiếp trên K8s/Ingress để xác định bottleneck chính xác.
+- OpenBao, PostgreSQL và network path vẫn cần được tách ra đo rõ hơn trên hạ tầng thật.
 
 ### Cần bổ sung
-- Chạy lại 4 bài test trên **VM GEIC hoặc cluster thật** của công ty.
-- Truy cập qua **LoadBalancer hoặc Ingress**, không dùng `port-forward`.
-- Đo resource của app, OpenBao, PostgreSQL, Redis trong lúc chạy benchmark.
+- Chạy lại 4 bài test qua **LoadBalancer hoặc Ingress** trên K8s/cluster thật.
+- Đo resource đầy đủ của app, OpenBao, PostgreSQL, Redis trong lúc chạy benchmark.
+- Hoàn tất luồng triển khai K8s trước khi ghi nhận số liệu benchmark K8s vào tài liệu này.
 - Xác nhận lại memory sizing trước khi giảm `requests/limits` cho production.
-- Chỉ quyết định HPA theo CPU hay custom metric sau khi có số đo thật.
+- Tách rõ nguyên nhân spike fail: backpressure app, OpenBao, DB hay network path.
+- Chỉ quyết định HPA theo CPU hay custom metric sau khi có số đo thật trên cluster.
 - Đánh giá tăng CPU/RAM hoặc cấu hình cluster cho OpenBao trước khi nghĩ đến sharding tenant.
 
 ---
@@ -246,7 +326,7 @@ Các số liệu này **chưa đủ cơ sở để chốt production sizing** v�
 ## Cải thiện Spike — Kết quả 3 hướng test
 
 ### Bối cảnh
-Spike test (500 concurrent) cho thấy tỉ lệ thành công chỉ 28% (1 pod, Docker). Hiện tại có dấu hiệu crypto layer là điểm nghẽn chính, nhưng đây vẫn là kết luận sơ bộ từ local test.
+Spike test local cho thấy tỉ lệ thành công chỉ 28% (1 pod, Docker). Benchmark VM còn thấp hơn, khoảng `~4.5% success` ở 500 concurrent. Điều này cho thấy hệ thống hiện chưa chịu burst tốt trên môi trường VM, nhưng vẫn cần benchmark qua K8s/Ingress để tách rõ bottleneck.
 
 ### Hướng 1 — Tăng backpressure threshold (đã test, bác bỏ)
 
@@ -301,7 +381,7 @@ Spike test (500 concurrent) cho thấy tỉ lệ thành công chỉ 28% (1 pod, 
 | **5 pods, threshold 200** | **48.7%** | **Tốt nhất** |
 | 2 pods + HPA CPU | ~45% | HPA không trigger |
 
-**Khuyến nghị production:** `minReplicas` cao (≥5) + chờ đủ data thực để scale OpenBao theo shard tenant khi cần.
+**Khuyến nghị hiện tại:** Chưa chốt tuning production chỉ từ local test. Ưu tiên benchmark tiếp trên K8s/Ingress thật trước khi quyết định `minReplicas`, HPA hay scale OpenBao.
 
 ---
 

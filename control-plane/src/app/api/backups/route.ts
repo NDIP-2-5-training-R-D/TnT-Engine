@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       });
 
       const { logCpAction } = await import("@/lib/cp-audit");
-      logCpAction({
+      await logCpAction({
         action: "BACKUP_TRIGGER",
         performed_by: auth.user!.username,
         role: auth.user!.role,

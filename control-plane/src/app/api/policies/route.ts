@@ -96,15 +96,15 @@ export async function POST(request: NextRequest) {
 
     if (res.ok || res.status === 204) {
       const { logCpAction } = await import("@/lib/cp-audit");
-      logCpAction({ action: "POLICY_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target: body.name, result: "success" });
+      await logCpAction({ action: "POLICY_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target: body.name, result: "success" });
       return NextResponse.json({ success: true, message: `Policy '${body.name}' saved.` });
     }
     const { logCpAction: log } = await import("@/lib/cp-audit");
-    log({ action: "POLICY_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target: body.name, result: "failure", detail: `HTTP ${res.status}` });
+    await log({ action: "POLICY_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target: body.name, result: "failure", detail: `HTTP ${res.status}` });
     return NextResponse.json({ success: false, message: `Save failed: HTTP ${res.status}` }, { status: 502 });
   } catch (err) {
     const { logCpAction: log } = await import("@/lib/cp-audit");
-    log({ action: "POLICY_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target: body.name, result: "failure", detail: String(err) });
+    await log({ action: "POLICY_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target: body.name, result: "failure", detail: String(err) });
     return NextResponse.json({ success: false, message: `Save failed: ${err}` }, { status: 502 });
   }
 }

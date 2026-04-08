@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const { logCpAction } = await import("@/lib/cp-audit");
-        logCpAction({ action: "KEY_ROTATE", performed_by: auth.user!.username, role: auth.user!.role, target: keyName, result: "success", detail: `New version: ${newVersion}` });
+        await logCpAction({ action: "KEY_ROTATE", performed_by: auth.user!.username, role: auth.user!.role, target: keyName, result: "success", detail: `New version: ${newVersion}` });
       } catch { /* audit must never break the main flow */ }
 
       return NextResponse.json({
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const { logCpAction } = await import("@/lib/cp-audit");
-      logCpAction({ action: "KEY_ROTATE", performed_by: auth.user!.username, role: auth.user!.role, target: keyName, result: "failure", detail: `HTTP ${res.status}` });
+      await logCpAction({ action: "KEY_ROTATE", performed_by: auth.user!.username, role: auth.user!.role, target: keyName, result: "failure", detail: `HTTP ${res.status}` });
     } catch { /* ignore */ }
     return NextResponse.json({ success: false, message: `Rotation failed: HTTP ${res.status}` }, { status: 502 });
   } catch (err) {

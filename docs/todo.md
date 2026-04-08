@@ -64,6 +64,29 @@ Những vấn đề này cần giải quyết trước khi làm bất kỳ featu
 
 ---
 
+### 2.3 K8s Benchmark Environment chưa hoàn chỉnh
+
+**Mức độ**: HIGH  
+**Vấn đề**: Đã benchmark được bằng Docker trên VM GEIC, nhưng luồng benchmark qua K8s + Ingress vẫn chưa hoàn tất. Helm chart hiện mới đưa `tnt-engine` app lên cluster; các dependency cần thiết để app startup và benchmark đúng reviewer path vẫn chưa đầy đủ trong K8s:
+
+- PostgreSQL
+- Redis
+- OpenBao
+
+**Hệ quả**:
+- Pod app có thể fail startup nếu `values-dev.yaml` trỏ tới hostname nội bộ cluster chưa tồn tại
+- Chưa benchmark được đúng đường `client -> ingress -> service -> pod -> dependency`
+- Chưa đủ cơ sở kết luận latency/overhead K8s theo yêu cầu reviewer
+
+**Cần làm**:
+- Hoàn tất tài liệu triển khai K8s: `docs/k8s-deployment-guide.md`
+- Chọn 1 trong 2 hướng:
+  - benchmark nhanh: app trong K8s, dependency ngoài K8s
+  - benchmark đầy đủ: app + dependency đều trong K8s
+- Chỉ update kết luận benchmark K8s sau khi pass toàn bộ flow health/ready/tokenize qua ingress
+
+---
+
 ### ✅ 2.2 [M3] Real-time Event Stream — ĐÃ LÀM (2026-04-07)
 
 **Mức độ**: MEDIUM  
@@ -197,6 +220,7 @@ Backend được đánh giá là **production-ready** cho core functionality. C�
 ┌─────────────────────────────────────────────────────────┐
 │  SPRINT 2 — Completeness (Medium)                       │
 │                                                         │
+│  2.3  Hoàn tất môi trường benchmark K8s + Ingress      │
 │  3.2  Namespace propagation (NamespaceSwitcher works)  │
 │  3.1  Transform rules CRUD (không hardcode)            │
 │  3.3  Backup error handling UI                         │
@@ -223,6 +247,7 @@ Backend được đánh giá là **production-ready** cho core functionality. C�
 |---|---|---|---|---|
 | ✅ 1.1 | Fix bug `audit/export/route.ts` | HIGH | ~~Ngay~~ | ✅ Done |
 | ✅ 2.1 | CP action audit trail | HIGH | ~~Sprint 1~~ | ✅ Done |
+| 2.3 | Hoàn tất môi trường benchmark K8s + Ingress | HIGH | Sprint 2 | 1-2 ngày |
 | 3.2 | Namespace propagation | MEDIUM | Sprint 2 | 0.5 ngày |
 | 3.1 | Transform rules CRUD | MEDIUM | Sprint 2 | 1 ngày |
 | 3.3 | Backup error handling UI | LOW | Sprint 2 | 2 giờ |

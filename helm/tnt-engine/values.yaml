@@ -181,13 +181,7 @@ secrets:
 # When enabled, secrets are pulled from OpenBao/Vault at runtime
 # via the External Secrets Operator CRD. Static secrets.yaml is disabled.
 
-# ── TLS Certificates (mount CA certs into pod) ──────────────────────
-
-tlsCerts:
-  enabled: false
-  secretName: "tnt-engine-tls-certs"
-
-# ── External Secrets Operator (recommended for staging/production) ───
+externalSecrets:
   enabled: false
   refreshInterval: "1h"
   secretStoreRef:
@@ -205,3 +199,9 @@ tlsCerts:
   #   - secretKey: TNT_CRYPTO_TOKEN
   #     remoteKey: secret/data/tnt-engine/crypto
   #     property: token
+
+# ── TLS Certificates (mount CA certs into pod) ──────────────────────
+
+tlsCerts:
+  enabled: false
+  secretName: "tnt-engine-tls-certs"

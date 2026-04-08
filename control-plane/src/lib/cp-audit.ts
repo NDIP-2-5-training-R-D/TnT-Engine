@@ -1,13 +1,12 @@
 /**
  * Control Plane Audit Store
  *
- * Persists every mutative action performed via the Control Plane UI:
- * who did what, when, on which target, and whether it succeeded.
- *
- * Storage: file-backed (/tmp/tnt-cp-audit.json) — migrate to PostgreSQL for prod (4.2).
+ * Storage modes:
+ *   - file (default, dev/demo)
+ *   - postgres (recommended for persistent multi-replica deployments)
  */
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { existsSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -27,22 +26,37 @@ export interface CpAuditEntry {
   action: CpAction;
   performed_by: string;
   role: string;
-  target?: string;       // key name, policy name, role name, etc.
+  target?: string;
   result: "success" | "failure";
-  detail?: string;       // e.g. "New version: 3", error message on failure
-  performed_at: string;  // ISO timestamp
+  detail?: string;
+  performed_at: string;
 }
 
-const STORE_PATH = process.env.CP_AUDIT_STORE_PATH || join(tmpdir(), "tnt-cp-audit.json");
-const MAX_ENTRIES = 1000; // rotate when exceeded
-const MAX_DETAIL_LENGTH = 120;
+type QueryResultRow = Record<string, unknown>;
 
-// ── Storage helpers ────────────────────────────────────────────────
+type PgPool = {
+  query: (sql: string, params?: unknown[]) => Promise<{ rows: QueryResultRow[] }>;
+};
+
+const STORE_PATH = process.env.CP_AUDIT_STORE_PATH || join(tmpdir(), "tnt-cp-audit.json");
+const STORE_MODE = (process.env.CP_AUDIT_STORE || "file").toLowerCase();
+const MAX_ENTRIES = 1000;
+const MAX_DETAIL_LENGTH = 120;
+const PG_SSL = (process.env.PG_SSL || "false").toLowerCase() === "true";
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __tnt_cp_audit_pool: PgPool | undefined;
+  // eslint-disable-next-line no-var
+  var __tnt_cp_audit_schema_ready: Promise<void> | undefined;
+}
 
 function load(): CpAuditEntry[] {
   try {
     if (existsSync(STORE_PATH)) return JSON.parse(readFileSync(STORE_PATH, "utf-8"));
-  } catch { /* ignore parse errors */ }
+  } catch {
+    // ignore parse/read errors and treat as empty store
+  }
   return [];
 }
 
@@ -59,10 +73,77 @@ function sanitizeDetail(detail: string | undefined): string | undefined {
   return detail.slice(0, MAX_DETAIL_LENGTH);
 }
 
-// ── Public API ─────────────────────────────────────────────────────
+function databaseUrl(): string {
+  if (process.env.CP_AUDIT_DATABASE_URL) return process.env.CP_AUDIT_DATABASE_URL;
 
-/** Record a Control Plane action. Call after the action completes (success or failure). */
-export function logCpAction(entry: Omit<CpAuditEntry, "id" | "performed_at">): CpAuditEntry {
+  const user = encodeURIComponent(process.env.PG_USER || "tnt");
+  const password = encodeURIComponent(process.env.PG_PASSWORD || "tnt_secret");
+  const host = process.env.PG_HOST || "localhost";
+  const port = process.env.PG_PORT || "5432";
+  const database = process.env.PG_DATABASE || "tnt_engine";
+
+  return `postgresql://${user}:${password}@${host}:${port}/${database}`;
+}
+
+async function getPgPool(): Promise<PgPool> {
+  if (!globalThis.__tnt_cp_audit_pool) {
+    const pgModule = (await import("pg")) as {
+      Pool: new (config: { connectionString: string; ssl: false | { rejectUnauthorized: boolean } }) => PgPool;
+    };
+    globalThis.__tnt_cp_audit_pool = new pgModule.Pool({
+      connectionString: databaseUrl(),
+      ssl: PG_SSL ? { rejectUnauthorized: false } : false,
+    });
+  }
+
+  return globalThis.__tnt_cp_audit_pool;
+}
+
+async function ensurePgSchema(): Promise<void> {
+  if (!globalThis.__tnt_cp_audit_schema_ready) {
+    globalThis.__tnt_cp_audit_schema_ready = (async () => {
+      const pool = await getPgPool();
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS cp_audit_log (
+          id TEXT PRIMARY KEY,
+          action TEXT NOT NULL,
+          performed_by TEXT NOT NULL,
+          role TEXT NOT NULL,
+          target TEXT,
+          result TEXT NOT NULL,
+          detail TEXT,
+          performed_at TIMESTAMPTZ NOT NULL
+        )
+      `);
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_cp_audit_log_performed_at
+        ON cp_audit_log (performed_at DESC)
+      `);
+    })();
+  }
+
+  await globalThis.__tnt_cp_audit_schema_ready;
+}
+
+function rowToEntry(row: QueryResultRow): CpAuditEntry {
+  return {
+    id: String(row.id),
+    action: row.action as CpAction,
+    performed_by: String(row.performed_by),
+    role: String(row.role),
+    target: row.target ? String(row.target) : undefined,
+    result: row.result as "success" | "failure",
+    detail: row.detail ? String(row.detail) : undefined,
+    performed_at:
+      row.performed_at instanceof Date
+        ? row.performed_at.toISOString()
+        : String(row.performed_at),
+  };
+}
+
+export async function logCpAction(
+  entry: Omit<CpAuditEntry, "id" | "performed_at">
+): Promise<CpAuditEntry> {
   const record: CpAuditEntry = {
     ...entry,
     detail: sanitizeDetail(entry.detail),
@@ -70,22 +151,61 @@ export function logCpAction(entry: Omit<CpAuditEntry, "id" | "performed_at">): C
     performed_at: new Date().toISOString(),
   };
 
+  if (STORE_MODE === "postgres") {
+    await ensurePgSchema();
+    const pool = await getPgPool();
+    await pool.query(
+      `
+        INSERT INTO cp_audit_log (id, action, performed_by, role, target, result, detail, performed_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+      `,
+      [
+        record.id,
+        record.action,
+        record.performed_by,
+        record.role,
+        record.target ?? null,
+        record.result,
+        record.detail ?? null,
+        record.performed_at,
+      ]
+    );
+    return record;
+  }
+
   const entries = load();
-  entries.unshift(record); // newest first
-
-  // Keep store bounded
+  entries.unshift(record);
   if (entries.length > MAX_ENTRIES) entries.splice(MAX_ENTRIES);
-
   save(entries);
   return record;
 }
 
-/** List recent CP audit entries, newest first. */
-export function listCpAudit(limit = 50): CpAuditEntry[] {
+export async function listCpAudit(limit = 50): Promise<CpAuditEntry[]> {
+  if (STORE_MODE === "postgres") {
+    await ensurePgSchema();
+    const pool = await getPgPool();
+    const result = await pool.query(
+      `
+        SELECT id, action, performed_by, role, target, result, detail, performed_at
+        FROM cp_audit_log
+        ORDER BY performed_at DESC
+        LIMIT $1
+      `,
+      [limit]
+    );
+    return result.rows.map(rowToEntry);
+  }
+
   return load().slice(0, limit);
 }
 
-/** Count total stored entries. */
-export function cpAuditCount(): number {
+export async function cpAuditCount(): Promise<number> {
+  if (STORE_MODE === "postgres") {
+    await ensurePgSchema();
+    const pool = await getPgPool();
+    const result = await pool.query("SELECT COUNT(*)::int AS count FROM cp_audit_log");
+    return Number(result.rows[0]?.count ?? 0);
+  }
+
   return load().length;
 }
