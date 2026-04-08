@@ -131,15 +131,24 @@ export interface TransformRulesResponse {
 
 // ── Playground ─────────────────────────────────────────────────────
 
-export type PlaygroundOperation =
-  | "TOKENIZE"
-  | "MASK"
-  | "HMAC"
-  | "DETOKENIZE"
-  | "HMAC_SHA512"
-  | "AES256_GCM96"
-  | "FF3_1"
-  | "MASK_TEMPLATE";
+/** Const object so values can be used as type-safe keys without magic strings. */
+export const PlaygroundOp = {
+  TOKENIZE:      "TOKENIZE",
+  MASK:          "MASK",
+  HMAC:          "HMAC",
+  DETOKENIZE:    "DETOKENIZE",
+  HMAC_SHA512:   "HMAC_SHA512",
+  AES256_GCM96:  "AES256_GCM96",
+  FF3_1:         "FF3_1",
+  MASK_TEMPLATE: "MASK_TEMPLATE",
+} as const;
+
+export type PlaygroundOperation = (typeof PlaygroundOp)[keyof typeof PlaygroundOp];
+
+/** Extra request body field required by some operations. Key = operation value. */
+export const OPERATION_EXTRA_FIELD: Partial<Record<PlaygroundOperation, string>> = {
+  [PlaygroundOp.MASK_TEMPLATE]: "mask_template",
+};
 
 export interface PlaygroundResult {
   operation: PlaygroundOperation;
