@@ -17,38 +17,15 @@ import type {
   PlaygroundResult,
   SensitivityLevel,
 } from "@/lib/types";
-import type { OpMeta } from "@/app/api/playground/meta/route";
+import type { OpMeta, FieldDefMeta } from "@/app/api/playground/meta/route";
 
-// ── Field definitions (governance) ────────────────────────────────
+// ── Classification display config ──────────────────────────────────
 
-interface FieldDef {
-  label: string;
-  classification: SensitivityLevel;
-  allowed: PlaygroundOperation[];
-  placeholder: string;
-  example: string;
-}
-
-const FIELD_DEFS: Record<string, FieldDef> = {
-  ssn:             { label: "SSN",              classification: "HIGH_SENSITIVE", allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1],                                                                                                                      placeholder: "e.g. 123-45-6789",      example: "123-45-6789" },
-  card:            { label: "Card Number",      classification: "HIGH_SENSITIVE", allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1],                                                                                                                      placeholder: "e.g. 4111111111111111",  example: "4111111111111111" },
-  tax_id:          { label: "Tax ID",           classification: "HIGH_SENSITIVE", allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1],                                                                                                                      placeholder: "e.g. 12-3456789",        example: "12-3456789" },
-  bank_account:    { label: "Bank Account",     classification: "HIGH_SENSITIVE", allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1],                                                                                                                      placeholder: "e.g. 123456789012",      example: "123456789012" },
-  passport:        { label: "Passport",         classification: "HIGH_SENSITIVE", allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1],                                                                                                                      placeholder: "e.g. A12345678",         example: "A12345678" },
-  email:           { label: "Email",            classification: "MEDIUM",         allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE],                          placeholder: "e.g. user@example.com",  example: "user@example.com" },
-  phone:           { label: "Phone",            classification: "MEDIUM",         allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE],                          placeholder: "e.g. 555-867-5309",      example: "555-867-5309" },
-  date_of_birth:   { label: "Date of Birth",    classification: "MEDIUM",         allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE],                          placeholder: "e.g. 1990-07-15",        example: "1990-07-15" },
-  drivers_license: { label: "Driver's License", classification: "MEDIUM",         allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE],                          placeholder: "e.g. D12345678",         example: "D12345678" },
-  name:            { label: "Full Name",        classification: "LOW",            allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE],                          placeholder: "e.g. John Doe",          example: "John Doe" },
-  address:         { label: "Address",          classification: "LOW",            allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE],                          placeholder: "e.g. 123 Main St",       example: "123 Main St" },
-  custom:          { label: "Custom Field",     classification: "UNCLASSIFIED",   allowed: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE],                          placeholder: "Any value",              example: "my-custom-value" },
-};
-
-const LEVEL_STYLE: Record<SensitivityLevel, { badge: string; icon: typeof ShieldAlert; }> = {
-  HIGH_SENSITIVE: { badge: "bg-red-500/20 text-red-300 border border-red-500/30",         icon: ShieldAlert  },
-  MEDIUM:         { badge: "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30",icon: Shield       },
-  LOW:            { badge: "bg-green-500/20 text-green-300 border border-green-500/30",   icon: ShieldCheck  },
-  UNCLASSIFIED:   { badge: "bg-slate-500/20 text-slate-400 border border-slate-500/30",   icon: Shield       },
+const LEVEL_STYLE: Record<SensitivityLevel, { badge: string; icon: typeof ShieldAlert }> = {
+  HIGH_SENSITIVE: { badge: "bg-red-500/20 text-red-300 border border-red-500/30",          icon: ShieldAlert },
+  MEDIUM:         { badge: "bg-yellow-500/20 text-yellow-300 border border-yellow-500/30", icon: Shield      },
+  LOW:            { badge: "bg-green-500/20 text-green-300 border border-green-500/30",    icon: ShieldCheck },
+  UNCLASSIFIED:   { badge: "bg-slate-500/20 text-slate-400 border border-slate-500/30",    icon: Shield      },
 };
 
 const OP_ICON: Record<string, React.ElementType> = {
@@ -73,15 +50,14 @@ const OP_COLOR: Record<string, string> = {
   [PlaygroundOp.MASK_TEMPLATE]: "text-blue-300",
 };
 
-// Mask template quick-fill presets shown under the template input
-const TEMPLATE_PRESETS = [
-  { label: "Card",  tmpl: "****-****-****-####" },
-  { label: "SSN",   tmpl: "***-**-####" },
-  { label: "Email", tmpl: "###@****" },
-  { label: "Phone", tmpl: "***-***-####" },
-];
-
 const AUTO_CLEAR_SECONDS = 120;
+
+// ── Static fallback field defs (used while meta is loading) ───────
+
+const FALLBACK_FIELD_DEFS: FieldDefMeta[] = [
+  { name: "email",  label: "Email",       classification: "MEDIUM",       allowed_operations: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE], template: "j***@domain",  placeholder: "e.g. user@example.com", example: "user@example.com" },
+  { name: "custom", label: "Custom Field", classification: "UNCLASSIFIED", allowed_operations: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE], template: "##****##",    placeholder: "Any value",             example: "my-custom-value" },
+];
 
 // ── Helper components ──────────────────────────────────────────────
 
@@ -137,7 +113,7 @@ function OpButton({
       title={denied ? "Not allowed for this classification" : meta.description}
       className={clsx(
         "rounded-lg border px-2.5 py-2 text-left text-xs transition-colors",
-        active  ? "border-indigo-500 bg-indigo-500/20 text-white"
+        active   ? "border-indigo-500 bg-indigo-500/20 text-white"
         : denied ? "border-slate-700 bg-slate-800/30 text-slate-600 cursor-not-allowed opacity-40"
                  : "border-slate-600 bg-slate-800/50 text-slate-300 hover:border-slate-500 hover:text-white",
       )}
@@ -164,34 +140,45 @@ function OpButton({
 // ── Main component ─────────────────────────────────────────────────
 
 export default function PlaygroundPage() {
-  const [fieldType, setFieldType]     = useState("email");
-  const [operation, setOperation]     = useState<PlaygroundOperation>(PlaygroundOp.TOKENIZE);
-  const [value, setValue]             = useState("");
+  const [fieldType, setFieldType]       = useState("email");
+  const [operation, setOperation]       = useState<PlaygroundOperation>(PlaygroundOp.TOKENIZE);
+  const [value, setValue]               = useState("");
   const [maskTemplate, setMaskTemplate] = useState("###@****");
-  const [running, setRunning]         = useState(false);
-  const [result, setResult]           = useState<PlaygroundResult | null>(null);
-  const [apiError, setApiError]       = useState<string | null>(null);
+  const [running, setRunning]           = useState(false);
+  const [result, setResult]             = useState<PlaygroundResult | null>(null);
+  const [apiError, setApiError]         = useState<string | null>(null);
   const [clearCountdown, setClearCountdown] = useState<number | null>(null);
 
-  // Ops catalogue + templates from /api/playground/meta
-  const [opCatalogue, setOpCatalogue] = useState<OpMeta[]>([]);
+  // Dynamic data from /api/playground/meta
+  const [opCatalogue, setOpCatalogue]   = useState<OpMeta[]>([]);
   const [maskTemplates, setMaskTemplates] = useState<Record<string, string>>({});
+  const [fieldDefs, setFieldDefs]       = useState<FieldDefMeta[]>(FALLBACK_FIELD_DEFS);
+  const [metaSource, setMetaSource]     = useState<"live" | "fallback" | null>(null);
 
   const clearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownRef  = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch metadata from API (not hardcoded)
+  // Fetch all playground metadata from BFF (which reads from transform_rules)
   useEffect(() => {
     fetch("/api/playground/meta")
       .then(r => r.json())
-      .then((data: { operations: OpMeta[]; mask_templates: Record<string, string> }) => {
-        setOpCatalogue(data.operations ?? []);
-        setMaskTemplates(data.mask_templates ?? {});
+      .then((data: {
+        operations: OpMeta[];
+        mask_templates: Record<string, string>;
+        field_defs: FieldDefMeta[];
+        source: "live" | "fallback";
+      }) => {
+        if (data.operations?.length)  setOpCatalogue(data.operations);
+        if (data.mask_templates)      setMaskTemplates(data.mask_templates);
+        if (data.field_defs?.length)  setFieldDefs(data.field_defs);
+        setMetaSource(data.source ?? "fallback");
       })
-      .catch(() => { /* fallback: catalogue remains empty, ops still shown as-is */ });
+      .catch(() => { /* keep fallback */ });
   }, []);
 
-  const fieldDef    = FIELD_DEFS[fieldType] ?? FIELD_DEFS.custom;
+  // Lookup helpers from dynamic field defs
+  const fieldDefMap = Object.fromEntries(fieldDefs.map(d => [d.name, d]));
+  const fieldDef    = fieldDefMap[fieldType] ?? fieldDefs[fieldDefs.length - 1] ?? FALLBACK_FIELD_DEFS[0];
   const levelStyle  = LEVEL_STYLE[fieldDef.classification];
   const LevelIcon   = levelStyle.icon;
   const standardOps = opCatalogue.filter(m => m.group === "standard");
@@ -200,15 +187,16 @@ export default function PlaygroundPage() {
 
   // When field changes: reset op if no longer allowed, update default template
   useEffect(() => {
-    const def = FIELD_DEFS[fieldType] ?? FIELD_DEFS.custom;
-    if (operation !== PlaygroundOp.DETOKENIZE && !def.allowed.includes(operation)) {
-      setOperation(def.allowed[0]);
+    const def = fieldDefMap[fieldType];
+    if (!def) return;
+    if (operation !== PlaygroundOp.DETOKENIZE && !def.allowed_operations.includes(operation)) {
+      setOperation(def.allowed_operations[0] ?? PlaygroundOp.TOKENIZE);
     }
-    setMaskTemplate(maskTemplates[fieldType] ?? "##****##");
+    if (maskTemplates[fieldType]) setMaskTemplate(maskTemplates[fieldType]);
   }, [fieldType, maskTemplates]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startAutoClear = useCallback(() => {
-    if (clearTimerRef.current) clearInterval(clearTimerRef.current);
+    if (clearTimerRef.current) clearTimeout(clearTimerRef.current);
     if (countdownRef.current)  clearInterval(countdownRef.current);
     setClearCountdown(AUTO_CLEAR_SECONDS);
     countdownRef.current = setInterval(() => {
@@ -239,7 +227,6 @@ export default function PlaygroundPage() {
     setRunning(true); setResult(null); setApiError(null);
 
     try {
-      // Build body using OPERATION_EXTRA_FIELD enum mapping (no magic strings)
       const body: Record<string, string> = {
         operation,
         field_type: fieldType,
@@ -263,11 +250,17 @@ export default function PlaygroundPage() {
     }
   };
 
-  const isDetokenize  = operation === PlaygroundOp.DETOKENIZE;
-  const isMaskTmpl    = operation === PlaygroundOp.MASK_TEMPLATE;
-  const opDenied      = !isDetokenize && !fieldDef.allowed.includes(operation);
-  const canRun        = value.trim().length > 0 && !opDenied && !running
-                        && (!isMaskTmpl || maskTemplate.trim().length > 0);
+  const isDetokenize = operation === PlaygroundOp.DETOKENIZE;
+  const isMaskTmpl   = operation === PlaygroundOp.MASK_TEMPLATE;
+  const opDenied     = !isDetokenize && !fieldDef.allowed_operations.includes(operation);
+  const canRun       = value.trim().length > 0 && !opDenied && !running
+                       && (!isMaskTmpl || maskTemplate.trim().length > 0);
+
+  // Template quick-fill presets derived from fetched templates
+  const templatePresets = Object.entries(maskTemplates)
+    .filter(([, tmpl]) => tmpl)
+    .slice(0, 6)
+    .map(([name, tmpl]) => ({ label: fieldDefMap[name]?.label ?? name, tmpl }));
 
   return (
     <div className="max-w-5xl">
@@ -276,9 +269,15 @@ export default function PlaygroundPage() {
         <FlaskConical className="w-6 h-6 text-indigo-400" />
         <h1 className="text-xl font-bold text-white">T&T Engine Simulation Playground</h1>
         <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">SANDBOX</span>
+        {metaSource === "live" && (
+          <span className="px-2 py-0.5 rounded-full text-xs bg-green-500/15 text-green-400 border border-green-500/25">
+            {fieldDefs.length} field types — live
+          </span>
+        )}
       </div>
       <p className="text-sm text-slate-400 mb-1">
         Test tokenization, masking, HMAC, AES-256-GCM96 and FF3-1 FPE against an isolated sandbox tenant.
+        Field types and allowed operations reflect the current transform rules.
       </p>
 
       {/* PII warning */}
@@ -291,7 +290,7 @@ export default function PlaygroundPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* ── Input panel ──────────────────────────────────────────── */}
+        {/* Input panel */}
         <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-5 flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-300">Input</h2>
@@ -300,7 +299,7 @@ export default function PlaygroundPage() {
             </button>
           </div>
 
-          {/* Field type */}
+          {/* Field type — built from dynamic transform rules */}
           <div>
             <label className="text-xs text-slate-500 mb-1.5 block">Field Type</label>
             <div className="flex items-center gap-2">
@@ -309,8 +308,8 @@ export default function PlaygroundPage() {
                 onChange={e => setFieldType(e.target.value)}
                 className="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
               >
-                {Object.entries(FIELD_DEFS).map(([key, def]) => (
-                  <option key={key} value={key}>{def.label}</option>
+                {fieldDefs.map(def => (
+                  <option key={def.name} value={def.name}>{def.label}</option>
                 ))}
               </select>
               <span className={clsx("flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium shrink-0", levelStyle.badge)}>
@@ -331,7 +330,7 @@ export default function PlaygroundPage() {
                     op={meta.id}
                     meta={meta}
                     active={operation === meta.id}
-                    denied={meta.id !== PlaygroundOp.DETOKENIZE && !fieldDef.allowed.includes(meta.id)}
+                    denied={meta.id !== PlaygroundOp.DETOKENIZE && !fieldDef.allowed_operations.includes(meta.id)}
                     onClick={() => setOperation(meta.id)}
                   />
                 ))}
@@ -350,7 +349,7 @@ export default function PlaygroundPage() {
                     op={meta.id}
                     meta={meta}
                     active={operation === meta.id}
-                    denied={!fieldDef.allowed.includes(meta.id)}
+                    denied={!fieldDef.allowed_operations.includes(meta.id)}
                     onClick={() => setOperation(meta.id)}
                   />
                 ))}
@@ -377,17 +376,19 @@ export default function PlaygroundPage() {
                 spellCheck={false}
                 className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2.5 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
-              <div className="flex gap-2 mt-1.5 flex-wrap">
-                {TEMPLATE_PRESETS.map(({ label, tmpl }) => (
-                  <button
-                    key={label}
-                    onClick={() => setMaskTemplate(tmpl)}
-                    className="text-[10px] px-2 py-0.5 rounded bg-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-600 transition-colors font-mono"
-                  >
-                    {label}: {tmpl}
-                  </button>
-                ))}
-              </div>
+              {templatePresets.length > 0 && (
+                <div className="flex gap-2 mt-1.5 flex-wrap">
+                  {templatePresets.map(({ label, tmpl }) => (
+                    <button
+                      key={label}
+                      onClick={() => setMaskTemplate(tmpl)}
+                      className="text-[10px] px-2 py-0.5 rounded bg-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-600 transition-colors font-mono"
+                    >
+                      {label}: {tmpl}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -464,7 +465,7 @@ export default function PlaygroundPage() {
           )}
         </div>
 
-        {/* ── Result panel ─────────────────────────────────────────── */}
+        {/* Result panel */}
         <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-5 flex flex-col gap-4">
           <h2 className="text-sm font-semibold text-slate-300">Result</h2>
 
@@ -514,11 +515,6 @@ export default function PlaygroundPage() {
                 <p className={clsx("font-mono text-sm break-all", OP_COLOR[result.operation] ?? "text-emerald-300")}>
                   {String(result.output_value)}
                 </p>
-                {result.operation === PlaygroundOp.MASK_TEMPLATE && (result as Record<string, unknown>).mask_template && (
-                  <p className="text-xs text-slate-500 mt-1.5 font-mono">
-                    Template: {String((result as Record<string, unknown>).mask_template)}
-                  </p>
-                )}
                 {result.operation === PlaygroundOp.FF3_1 && (
                   <p className="text-xs text-slate-500 mt-1.5">Format preserved · DEK from OpenBao envelope decryption</p>
                 )}
@@ -579,29 +575,29 @@ export default function PlaygroundPage() {
         </div>
       </div>
 
-      {/* Quick reference */}
+      {/* Governance quick reference — built from dynamic field defs */}
       <div className="mt-6 rounded-xl border border-slate-700 bg-slate-800/30 p-4">
         <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
           Governance quick reference
+          {metaSource === "live" && <span className="ml-2 text-green-400/70 normal-case font-normal">(live from transform rules)</span>}
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-          {([
-            { level: "HIGH_SENSITIVE" as SensitivityLevel, ops: [PlaygroundOp.TOKENIZE, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1], desc: "SSN, Card, Tax ID, Passport, Bank Account" },
-            { level: "MEDIUM"         as SensitivityLevel, ops: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE], desc: "Email, Phone, Date of Birth, Driver's License" },
-            { level: "LOW"            as SensitivityLevel, ops: [PlaygroundOp.TOKENIZE, PlaygroundOp.MASK, PlaygroundOp.HMAC, PlaygroundOp.HMAC_SHA512, PlaygroundOp.AES256_GCM96, PlaygroundOp.FF3_1, PlaygroundOp.MASK_TEMPLATE], desc: "Name, Address, City, ZIP" },
-          ]).map(({ level, ops, desc }) => {
+          {(["HIGH_SENSITIVE", "MEDIUM", "LOW"] as SensitivityLevel[]).map((level) => {
             const cfg = LEVEL_STYLE[level];
             const Icon = cfg.icon;
+            const fieldsAtLevel = fieldDefs.filter(d => d.classification === level);
+            const ops = fieldsAtLevel[0]?.allowed_operations ?? [];
+            const desc = fieldsAtLevel.map(d => d.label).join(", ") || "—";
             return (
               <div key={level} className="rounded-lg border border-slate-700 bg-slate-800/40 p-3">
                 <div className={clsx("flex items-center gap-1.5 px-2 py-0.5 rounded w-fit mb-2 font-medium text-[11px]", cfg.badge)}>
                   <Icon className="w-3 h-3" />{level.replace("_", " ")}
                 </div>
-                <p className="text-slate-500 mb-1.5">{desc}</p>
+                <p className="text-slate-500 mb-1.5 text-[11px]">{desc}</p>
                 <div className="flex gap-1 flex-wrap">
                   {ops.map(op => (
                     <span key={op} className="font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 text-[10px]">
-                      {opMetaMap[op]?.label ?? op}
+                      {opMetaMap[op as PlaygroundOperation]?.label ?? op}
                     </span>
                   ))}
                 </div>

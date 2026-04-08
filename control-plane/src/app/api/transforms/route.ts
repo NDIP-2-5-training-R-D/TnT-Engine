@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import type { TransformRule } from "@/lib/types";
 
-const TNT_URL = process.env.TNT_ENGINE_URL || "http://localhost:8000";
+const TNT_URL = (process.env.TNT_ENGINE_URL || "http://localhost:8000").replace(/\/$/, "");
 
 // Fallback canonical rules — used only when engine is unreachable.
 const CANONICAL_RULES: TransformRule[] = [
@@ -33,38 +33,57 @@ const CANONICAL_RULES: TransformRule[] = [
 // ── GET /api/transforms ───────────────────────────────────────────────
 
 export async function GET() {
+  // 1. Confirm engine is reachable via health endpoint
+  let engineAlive = false;
   try {
-    const res = await fetch(`${TNT_URL}/admin/rules`, {
-      signal: AbortSignal.timeout(5_000),
+    const h = await fetch(`${TNT_URL}/api/v1/health`, {
+      signal: AbortSignal.timeout(3_000),
     });
-    if (res.ok) {
-      const data = await res.json();
-      // Normalise DB rows to TransformRule shape (DB rows may lack some fields)
-      const rules: TransformRule[] = (data.rules ?? []).map((r: Record<string, unknown>) => ({
-        name: r.name,
-        type: r.type ?? "masking",
-        template: r.template ?? "",
-        tweak_source: r.tweak_source ?? "internal",
-        allowed_roles: r.allowed_roles ?? ["tnt-engine"],
-        classification: r.classification,
-        allowed_operations: r.allowed_operations ?? [],
-        description: r.description ?? "",
-        retention_days: r.retention_days ?? null,
-      }));
-      return NextResponse.json({
-        rules,
-        source: "live" as const,
-        fetched_at: new Date().toISOString(),
-      });
-    }
+    engineAlive = h.ok;
   } catch {
-    // engine unreachable — fall through to fallback
+    engineAlive = false;
   }
 
+  // 2. If alive, fetch rules from admin API
+  if (engineAlive) {
+    try {
+      const res = await fetch(`${TNT_URL}/admin/rules`, {
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const rules: TransformRule[] = (data.rules ?? []).map((r: Record<string, unknown>) => ({
+          name: r.name,
+          type: r.type ?? "masking",
+          template: r.template ?? "",
+          tweak_source: r.tweak_source ?? "internal",
+          allowed_roles: r.allowed_roles ?? ["tnt-engine"],
+          classification: r.classification,
+          allowed_operations: r.allowed_operations ?? [],
+          description: r.description ?? "",
+          retention_days: r.retention_days ?? null,
+        }));
+        return NextResponse.json({
+          rules,
+          source: "live" as const,
+          fetched_at: new Date().toISOString(),
+          engine_url: TNT_URL,
+        });
+      }
+      // Engine is alive but /admin/rules failed (table missing? not restarted?)
+      const errText = await res.text().catch(() => res.status.toString());
+      console.warn(`[transforms] /admin/rules returned ${res.status}: ${errText}`);
+    } catch (err) {
+      console.warn(`[transforms] /admin/rules fetch error:`, err);
+    }
+  }
+
+  // 3. Fallback to built-in canonical rules
   return NextResponse.json({
     rules: CANONICAL_RULES,
     source: "fallback" as const,
     fetched_at: new Date().toISOString(),
+    engine_url: TNT_URL,
   });
 }
 

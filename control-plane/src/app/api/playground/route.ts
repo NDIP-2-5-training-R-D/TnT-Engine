@@ -6,12 +6,10 @@
 //   - Original plaintext NEVER appears in the JSON response sent to the client.
 //   - Rate limited to 10 requests per minute per authenticated user.
 //   - Input size capped at 1 KB.
-//   - Governance check enforced server-side (mirrors classification.py logic).
+//   - Governance check enforced server-side from live transform_rules (60s cache).
 //
-// Crypto is NEVER computed in the BFF — all transformations (including
-// HMAC-SHA-512, AES256-GCM96, FF3-1, MASKING TEMPLATE) are delegated to
-// the T&T Engine, which uses OpenBao Transit (or sandbox backend) and
-// writes a full audit log entry for every operation.
+// Crypto is NEVER computed in the BFF — all transformations are delegated to
+// the T&T Engine, which uses OpenBao Transit and writes a full audit log entry.
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +18,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import type { SensitivityLevel } from "@/lib/types";
 
-const TNT_URL = process.env.TNT_ENGINE_URL || "http://localhost:8000";
+const TNT_URL = (process.env.TNT_ENGINE_URL || "http://localhost:8000").replace(/\/$/, "");
 const SANDBOX_TENANT = "sandbox";
 const MAX_VALUE_BYTES = 1_024;
 const RATE_WINDOW_MS = 60_000;
@@ -43,38 +41,83 @@ function checkRateLimit(userId: string): { allowed: boolean; remaining: number }
   return { allowed: true, remaining: RATE_MAX - bucket.count };
 }
 
-// ── Governance classification (mirrors classification.py) ───────────
+// ── Dynamic governance classification (60s in-memory cache) ────────
+// Fetched from T&T Engine /admin/rules so playground automatically
+// reflects any rule changes made through the control plane.
 
 interface Classification { level: SensitivityLevel; allowed: string[] }
 
-// Reversible ops (allowed for HIGH_SENSITIVE): TOKENIZE, AES256_GCM96, FF3_1
-// One-way ops (MEDIUM+): MASK, HMAC, HMAC_SHA512, MASK_TEMPLATE
-const CLASSIFICATION: Record<string, Classification> = {
-  ssn:             { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE", "AES256_GCM96", "FF3_1"] },
-  card:            { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE", "AES256_GCM96", "FF3_1"] },
-  credit_card:     { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE", "AES256_GCM96", "FF3_1"] },
-  tax_id:          { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE", "AES256_GCM96", "FF3_1"] },
-  bank_account:    { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE", "AES256_GCM96", "FF3_1"] },
-  passport:        { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE", "AES256_GCM96", "FF3_1"] },
-  email:           { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"] },
-  phone:           { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"] },
-  date_of_birth:   { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"] },
-  drivers_license: { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"] },
-  name:            { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE", "PASSTHROUGH"] },
-  first_name:      { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE", "PASSTHROUGH"] },
-  last_name:       { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE", "PASSTHROUGH"] },
-  address:         { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE", "PASSTHROUGH"] },
-  city:            { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE", "PASSTHROUGH"] },
-  zip_code:        { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE", "PASSTHROUGH"] },
+function classificationToPlaygroundOps(level: string): string[] {
+  switch (level) {
+    case "HIGH_SENSITIVE": return ["TOKENIZE", "AES256_GCM96", "FF3_1"];
+    case "MEDIUM":         return ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"];
+    case "LOW":            return ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"];
+    default:               return ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"];
+  }
+}
+
+// Static fallback — mirrors classification.py defaults
+const CLASSIFICATION_FALLBACK: Record<string, Classification> = {
+  ssn:             { level: "HIGH_SENSITIVE", allowed: classificationToPlaygroundOps("HIGH_SENSITIVE") },
+  card:            { level: "HIGH_SENSITIVE", allowed: classificationToPlaygroundOps("HIGH_SENSITIVE") },
+  credit_card:     { level: "HIGH_SENSITIVE", allowed: classificationToPlaygroundOps("HIGH_SENSITIVE") },
+  tax_id:          { level: "HIGH_SENSITIVE", allowed: classificationToPlaygroundOps("HIGH_SENSITIVE") },
+  bank_account:    { level: "HIGH_SENSITIVE", allowed: classificationToPlaygroundOps("HIGH_SENSITIVE") },
+  passport:        { level: "HIGH_SENSITIVE", allowed: classificationToPlaygroundOps("HIGH_SENSITIVE") },
+  email:           { level: "MEDIUM",         allowed: classificationToPlaygroundOps("MEDIUM") },
+  phone:           { level: "MEDIUM",         allowed: classificationToPlaygroundOps("MEDIUM") },
+  date_of_birth:   { level: "MEDIUM",         allowed: classificationToPlaygroundOps("MEDIUM") },
+  drivers_license: { level: "MEDIUM",         allowed: classificationToPlaygroundOps("MEDIUM") },
+  name:            { level: "LOW",            allowed: classificationToPlaygroundOps("LOW") },
+  first_name:      { level: "LOW",            allowed: classificationToPlaygroundOps("LOW") },
+  last_name:       { level: "LOW",            allowed: classificationToPlaygroundOps("LOW") },
+  address:         { level: "LOW",            allowed: classificationToPlaygroundOps("LOW") },
+  city:            { level: "LOW",            allowed: classificationToPlaygroundOps("LOW") },
+  zip_code:        { level: "LOW",            allowed: classificationToPlaygroundOps("LOW") },
 };
 
-const UNCLASSIFIED: Classification = {
+const UNCLASSIFIED_CLASS: Classification = {
   level: "UNCLASSIFIED",
-  allowed: ["TOKENIZE", "MASK", "HMAC", "HMAC_SHA512", "AES256_GCM96", "FF3_1", "MASK_TEMPLATE"],
+  allowed: classificationToPlaygroundOps("UNCLASSIFIED"),
 };
+
+// 60-second cache: refresh in background, serve stale on this request
+let _classCache: Record<string, Classification> = {};
+let _classCacheExpiry = 0;
+let _classCacheFetching = false;
+
+async function refreshClassificationCache(): Promise<void> {
+  if (_classCacheFetching) return;
+  _classCacheFetching = true;
+  try {
+    const res = await fetch(`${TNT_URL}/admin/rules`, {
+      signal: AbortSignal.timeout(4_000),
+    });
+    if (!res.ok) return;
+    const data = await res.json() as { rules?: Array<Record<string, unknown>> };
+    if (!data.rules?.length) return;
+    const map: Record<string, Classification> = {};
+    for (const rule of data.rules) {
+      const name = String(rule.name ?? "");
+      const level = String(rule.classification ?? "UNCLASSIFIED");
+      map[name] = { level: level as SensitivityLevel, allowed: classificationToPlaygroundOps(level) };
+    }
+    _classCache = map;
+    _classCacheExpiry = Date.now() + 60_000;
+  } catch {
+    // keep existing cache / fallback on next request
+  } finally {
+    _classCacheFetching = false;
+  }
+}
 
 function classify(fieldType: string): Classification {
-  return CLASSIFICATION[fieldType.toLowerCase()] ?? UNCLASSIFIED;
+  if (Date.now() > _classCacheExpiry) {
+    // Trigger async refresh; serve stale/fallback for this request
+    void refreshClassificationCache();
+  }
+  const cache = Object.keys(_classCache).length > 0 ? _classCache : CLASSIFICATION_FALLBACK;
+  return cache[fieldType.toLowerCase()] ?? UNCLASSIFIED_CLASS;
 }
 
 function redactToken(token: string): string {
@@ -181,7 +224,7 @@ export async function POST(req: NextRequest) {
   const startMs = Date.now();
 
   try {
-    // ── 6a. DETOKENIZE — reverse-lookup in engine ────────────────────
+    // 6a. DETOKENIZE — reverse-lookup in engine
     if (op === "DETOKENIZE") {
       const engineRes = await fetch(`${TNT_URL}/api/v1/detokenize`, {
         method: "POST",
@@ -221,10 +264,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ── 6b. All other operations — delegated to T&T Engine ───────────
-    // Engine handles: TOKENIZE, MASK, HMAC, HMAC_SHA512, AES256_GCM96, FF3_1, MASK_TEMPLATE
-    // Audit log is written by the engine for every operation.
-
+    // 6b. All other operations — delegated to T&T Engine
     const enginePayload: Record<string, unknown> = {
       value: value.trim(),
       field: fieldType,
