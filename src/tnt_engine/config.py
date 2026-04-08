@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     crypto_token: str = "dev-token"
     crypto_transit_key: str = "tnt-key"
     crypto_hmac_key: str = "tnt-hmac"
+    crypto_aes_gcm_key: str = "tnt-aes-gcm"   # Dedicated AES-256-GCM96 transit key
+    crypto_fpe_key: str = "tnt-fpe"            # Dedicated FPE / FF3-1 key
     crypto_timeout_seconds: float = 5.0
     crypto_max_retries: int = 3
     crypto_verify_ssl: bool = True      # Verify OpenBao server certificate

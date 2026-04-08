@@ -121,6 +121,12 @@ export interface TransformRule {
   classification: SensitivityLevel;
   allowed_operations: string[];
   description: string;
+  retention_days?: number | null;
+  // DB-only fields (present when source === "live")
+  id?: number;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface TransformRulesResponse {
@@ -129,9 +135,49 @@ export interface TransformRulesResponse {
   fetched_at: string;
 }
 
+/** Request body for POST /api/transforms and PUT /api/transforms/[name] */
+export interface RuleUpsertRequest {
+  name: string;
+  type: "fpe" | "masking" | "hash";
+  template: string;
+  tweak_source: string;
+  allowed_roles: string[];
+  classification: SensitivityLevel;
+  allowed_operations: string[];
+  description: string;
+  retention_days?: number | null;
+}
+
+export interface RuleUpsertResponse {
+  status: "created" | "updated" | "deleted";
+  name: string;
+}
+
+export interface RuleErrorResponse {
+  error?: string;
+  detail?: string | { msg: string; type: string }[];
+}
+
 // ── Playground ─────────────────────────────────────────────────────
 
-export type PlaygroundOperation = "TOKENIZE" | "MASK" | "HMAC" | "DETOKENIZE";
+/** Const object so values can be used as type-safe keys without magic strings. */
+export const PlaygroundOp = {
+  TOKENIZE:      "TOKENIZE",
+  MASK:          "MASK",
+  HMAC:          "HMAC",
+  DETOKENIZE:    "DETOKENIZE",
+  HMAC_SHA512:   "HMAC_SHA512",
+  AES256_GCM96:  "AES256_GCM96",
+  FF3_1:         "FF3_1",
+  MASK_TEMPLATE: "MASK_TEMPLATE",
+} as const;
+
+export type PlaygroundOperation = (typeof PlaygroundOp)[keyof typeof PlaygroundOp];
+
+/** Extra request body field required by some operations. Key = operation value. */
+export const OPERATION_EXTRA_FIELD: Partial<Record<PlaygroundOperation, string>> = {
+  [PlaygroundOp.MASK_TEMPLATE]: "mask_template",
+};
 
 export interface PlaygroundResult {
   operation: PlaygroundOperation;

@@ -3,13 +3,17 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Transformation(str, enum.Enum):
     TOKENIZE = "TOKENIZE"
     HMAC = "HMAC"
     MASK = "MASK"
+    HMAC_SHA512 = "HMAC_SHA512"       # One-way HMAC-SHA-512 digest (via Transit)
+    AES256_GCM96 = "AES256_GCM96"     # Authenticated encryption, 96-bit nonce (via Transit)
+    FF3_1 = "FF3_1"                   # Format-Preserving Encryption NIST SP 800-38G (via Transit FPE key)
+    MASK_TEMPLATE = "MASK_TEMPLATE"   # Custom masking template: # = reveal, * = mask
 
 
 class TokenStatus(str, enum.Enum):
@@ -26,6 +30,10 @@ class AuditAction(str, enum.Enum):
     REVOKE = "REVOKE"
     DELETE = "DELETE"
     REENCRYPT = "REENCRYPT"
+    HMAC_SHA512 = "HMAC_SHA512"
+    AES256_GCM96 = "AES256_GCM96"
+    FF3_1 = "FF3_1"
+    MASK_TEMPLATE = "MASK_TEMPLATE"
 
 
 # ── Request / Response models ────────────────────────────────────────
@@ -37,6 +45,7 @@ class TokenizeRequest(BaseModel):
     transformation: Transformation = Transformation.TOKENIZE
     tenant_id: str = Field(..., min_length=1)
     ttl_seconds: int | None = None
+    mask_template: str | None = None  # Required when transformation=MASK_TEMPLATE
 
 
 class TokenizeResponse(BaseModel):
@@ -103,6 +112,12 @@ class TokenLookupRecord(BaseModel):
     token: str
 
 
+# Keys that must never appear in AuditEntry.metadata — they would indicate PII leakage.
+_AUDIT_FORBIDDEN_METADATA_KEYS: frozenset[str] = frozenset({
+    "value", "plaintext", "pii", "secret", "password", "raw_value", "token_value",
+})
+
+
 class AuditEntry(BaseModel):
     action: AuditAction
     field: str | None = None
@@ -110,3 +125,14 @@ class AuditEntry(BaseModel):
     trace_id: str | None = None
     status: str = "success"  # "success" or "failure"
     metadata: dict = Field(default_factory=dict)
+
+    @field_validator("metadata")
+    @classmethod
+    def _no_pii_in_metadata(cls, v: dict) -> dict:
+        """Reject any metadata dict that contains keys associated with PII values."""
+        bad = _AUDIT_FORBIDDEN_METADATA_KEYS & {k.lower() for k in v}
+        if bad:
+            raise ValueError(
+                f"AuditEntry.metadata must not contain PII keys: {sorted(bad)}"
+            )
+        return v

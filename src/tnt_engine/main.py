@@ -77,6 +77,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # ── Governance + Security ────────────────────────────────────
     governance = ClassificationRegistry()
+    # Load persisted rules from DB — overrides in-memory defaults.
+    # The transform_rules table is seeded with the same 16 defaults on first boot,
+    # so this is a no-op on fresh installs and picks up admin changes on restart.
+    try:
+        rows = await db.read_pool.fetch(
+            "SELECT name, classification, description, retention_days "
+            "FROM transform_rules WHERE is_active = true"
+        )
+        if rows:
+            governance.load_from_rows([dict(r) for r in rows])
+    except Exception as _exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "transform_rules_load_failed — using defaults: %s", _exc
+        )
+
     rate_limiter = RateLimiter(max_requests=5000, window_seconds=60)
     quota_manager = QuotaManager()
 

@@ -78,6 +78,36 @@ class ClassificationRegistry:
             level=classification.level.value,
         )
 
+    def deregister(self, field_type: str) -> bool:
+        """Remove a field classification. Returns True if it existed."""
+        existed = field_type in self._registry
+        self._registry.pop(field_type, None)
+        if existed:
+            logger.info("field_classification_deregistered", field_type=field_type)
+        return existed
+
+    def load_from_rows(self, rows: list[dict]) -> int:
+        """Bulk-load classifications from DB rows (transform_rules table).
+
+        Each row must have: name, classification, description, retention_days.
+        Existing entries are overwritten. Returns number of rules loaded.
+        """
+        count = 0
+        for row in rows:
+            try:
+                fc = FieldClassification(
+                    field_type=row["name"],
+                    level=SensitivityLevel(row["classification"]),
+                    description=row.get("description", ""),
+                    retention_days=row.get("retention_days"),
+                )
+                self._registry[fc.field_type] = fc
+                count += 1
+            except (KeyError, ValueError) as exc:
+                logger.warning("rule_load_skipped", name=row.get("name"), error=str(exc))
+        logger.info("rules_loaded_from_db", count=count)
+        return count
+
     def classify(self, field_type: str) -> FieldClassification:
         """Look up classification for a field type. Returns UNCLASSIFIED if unknown."""
         return self._registry.get(
