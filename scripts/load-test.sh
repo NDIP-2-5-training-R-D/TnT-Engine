@@ -60,6 +60,8 @@ elif command -v wrk &> /dev/null; then
     echo "Using wrk (hey not found)"
     DURATION="30s"
     CONNECTIONS=100
+    LUA_SCRIPT="$(mktemp)"
+    trap 'rm -f "${LUA_SCRIPT}"' EXIT
     case "$TEST_TYPE" in
         baseline) CONNECTIONS=10; DURATION="30s" ;;
         load)     CONNECTIONS=100; DURATION="60s" ;;
@@ -67,13 +69,14 @@ elif command -v wrk &> /dev/null; then
         soak)     CONNECTIONS=50; DURATION="600s" ;;
     esac
 
-    wrk -t4 -c${CONNECTIONS} -d${DURATION} \
-        -s <(cat <<'LUA'
+    cat > "${LUA_SCRIPT}" <<'LUA'
 wrk.method = "POST"
 wrk.headers["Content-Type"] = "application/json"
 wrk.body = '{"value":"wrk-test","field":"ssn","tenant_id":"load_test","transformation":"TOKENIZE"}'
 LUA
-) "$ENDPOINT"
+
+    wrk -t4 -c${CONNECTIONS} -d${DURATION} \
+        -s "${LUA_SCRIPT}" "$ENDPOINT"
 else
     echo "ERROR: Neither 'hey' nor 'wrk' found. Install one:"
     echo "  brew install hey"

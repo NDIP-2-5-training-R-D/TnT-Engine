@@ -18,7 +18,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { type AuditEvent, toCEF, toSIEMJson } from "@/lib/siem-formatter";
 
 const TNT_URL = process.env.TNT_ENGINE_URL || "http://localhost:8000";
-const VAULT_TOKEN_HEADER = process.env.VAULT_TOKEN || "";
 
 export async function GET(request: NextRequest) {
   // RBAC: any authenticated user can export
@@ -34,13 +33,14 @@ export async function GET(request: NextRequest) {
   // Fetch audit entries from T&T Engine
   let events: AuditEvent[] = [];
   try {
-    // Build query params for the backend
-    const params = new URLSearchParams();
-    if (tenant) params.set("tenant_id", tenant);
-    if (since) params.set("since", since);
-    params.set("limit", limit.toString());
+    const queryBody: Record<string, any> = { limit };
+    if (tenant) queryBody.tenant_id = tenant;
+    if (since) queryBody.since = since;
 
-    const res = await fetch(`${TNT_URL}/admin/audit/status`, {
+    const res = await fetch(`${TNT_URL}/admin/audit/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(queryBody),
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
     });

@@ -57,6 +57,15 @@ export async function POST(request: NextRequest) {
     }
 
     const req = createApproval(action, target, auth.user!.username, auth.user!.role, reason);
+    const { logCpAction } = await import("@/lib/cp-audit");
+    await logCpAction({
+      action: "APPROVAL_CREATE",
+      performed_by: auth.user!.username,
+      role: auth.user!.role,
+      target,
+      result: "success",
+      detail: `action=${action}`,
+    });
     return NextResponse.json({ success: true, message: "Approval request created", request: req });
   }
 
@@ -79,6 +88,15 @@ export async function POST(request: NextRequest) {
     if (decision === "approved" && result.request) {
       const execResult = await executeApprovedAction(result.request.action, result.request.target);
       markExecuted(result.request.id);
+      const { logCpAction } = await import("@/lib/cp-audit");
+      await logCpAction({
+        action: "APPROVAL_REVIEW",
+        performed_by: auth.user!.username,
+        role: auth.user!.role,
+        target: result.request.target,
+        result: execResult.success ? "success" : "failure",
+        detail: `decision=approved action=${result.request.action}`,
+      });
       return NextResponse.json({
         success: true,
         message: `Request approved and executed: ${execResult.message}`,
@@ -86,6 +104,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    const { logCpAction: log } = await import("@/lib/cp-audit");
+    await log({
+      action: "APPROVAL_REVIEW",
+      performed_by: auth.user!.username,
+      role: auth.user!.role,
+      target: result.request?.target,
+      result: "success",
+      detail: "decision=rejected",
+    });
     return NextResponse.json({
       success: true,
       message: `Request ${decision}`,

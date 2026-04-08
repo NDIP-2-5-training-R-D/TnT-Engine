@@ -86,6 +86,8 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await res.json();
+    const { logCpAction } = await import("@/lib/cp-audit");
+    await logCpAction({ action: "APPROLE_SECRET_GEN", performed_by: auth.user!.username, role: auth.user!.role, target: body.role_name, result: "success" });
     // SecOps: secret_id is returned ONCE — client must display and mask after 30s
     return NextResponse.json({
       secret_id: data?.data?.secret_id ?? "",

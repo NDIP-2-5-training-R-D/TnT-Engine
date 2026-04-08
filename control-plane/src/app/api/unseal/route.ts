@@ -1,6 +1,6 @@
 // BFF: Unseal Operations
 //
-// GET:  Returns current seal status (SSE-compatible for live updates)
+// GET:  Returns current seal status
 // POST: Submit an unseal key shard
 //
 // Security:
@@ -100,10 +100,15 @@ export async function POST(request: NextRequest) {
   try {
     const result = await submitUnsealKey(body.key);
 
-    // Log the unseal attempt (reason is recorded, key is NOT)
-    console.log(
-      `[AUDIT] Unseal attempt | sealed=${result.sealed} | progress=${result.progress}/${result.t} | reason="${body.reason}"`
-    );
+    const { logCpAction } = await import("@/lib/cp-audit");
+    const unsealed = !result.sealed;
+    await logCpAction({
+      action: "UNSEAL",
+      performed_by: auth.user!.username,
+      role: auth.user!.role,
+      result: "success",
+      detail: unsealed ? "vault_unsealed" : `progress=${result.progress}/${result.t}`,
+    });
 
     return NextResponse.json({
       success: true,

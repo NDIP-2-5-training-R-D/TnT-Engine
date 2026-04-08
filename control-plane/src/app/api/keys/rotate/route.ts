@@ -66,14 +66,24 @@ export async function POST(request: NextRequest) {
         headers: { "X-Vault-Token": VAULT_TOKEN },
       });
       const info = await infoRes.json();
+      const newVersion = info?.data?.latest_version ?? 0;
+
+      try {
+        const { logCpAction } = await import("@/lib/cp-audit");
+        await logCpAction({ action: "KEY_ROTATE", performed_by: auth.user!.username, role: auth.user!.role, target: keyName, result: "success", detail: `New version: ${newVersion}` });
+      } catch { /* audit must never break the main flow */ }
 
       return NextResponse.json({
         success: true,
         message: `Key '${keyName}' rotated successfully.`,
-        new_version: info?.data?.latest_version ?? 0,
+        new_version: newVersion,
       });
     }
 
+    try {
+      const { logCpAction } = await import("@/lib/cp-audit");
+      await logCpAction({ action: "KEY_ROTATE", performed_by: auth.user!.username, role: auth.user!.role, target: keyName, result: "failure", detail: `HTTP ${res.status}` });
+    } catch { /* ignore */ }
     return NextResponse.json({ success: false, message: `Rotation failed: HTTP ${res.status}` }, { status: 502 });
   } catch (err) {
     return NextResponse.json({ success: false, message: `Rotation request failed: ${err}` }, { status: 502 });

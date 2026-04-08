@@ -98,6 +98,15 @@ export async function POST(request: NextRequest) {
         duration_ms: Date.now() - t0,
       });
 
+      const { logCpAction } = await import("@/lib/cp-audit");
+      await logCpAction({
+        action: "BACKUP_TRIGGER",
+        performed_by: auth.user!.username,
+        role: auth.user!.role,
+        result: "success",
+        detail: `size_kb=${Math.round(buffer.length / 1024)}`,
+      });
+
       return NextResponse.json({ success: true, backup: record });
     } catch (err) {
       const record = recordBackup({
