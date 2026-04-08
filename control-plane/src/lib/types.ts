@@ -121,12 +121,41 @@ export interface TransformRule {
   classification: SensitivityLevel;
   allowed_operations: string[];
   description: string;
+  retention_days?: number | null;
+  // DB-only fields (present when source === "live")
+  id?: number;
+  is_active?: boolean;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface TransformRulesResponse {
   rules: TransformRule[];
   source: "live" | "fallback";
   fetched_at: string;
+}
+
+/** Request body for POST /api/transforms and PUT /api/transforms/[name] */
+export interface RuleUpsertRequest {
+  name: string;
+  type: "fpe" | "masking" | "hash";
+  template: string;
+  tweak_source: string;
+  allowed_roles: string[];
+  classification: SensitivityLevel;
+  allowed_operations: string[];
+  description: string;
+  retention_days?: number | null;
+}
+
+export interface RuleUpsertResponse {
+  status: "created" | "updated" | "deleted";
+  name: string;
+}
+
+export interface RuleErrorResponse {
+  error?: string;
+  detail?: string | { msg: string; type: string }[];
 }
 
 // ── Playground ─────────────────────────────────────────────────────
