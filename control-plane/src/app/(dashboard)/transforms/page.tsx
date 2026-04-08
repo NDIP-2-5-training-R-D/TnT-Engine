@@ -1,9 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Wand2, ArrowRight, Wifi, WifiOff, RefreshCw, ShieldAlert, Shield, ShieldCheck } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import {
+  Wand2, ArrowRight, Wifi, WifiOff, RefreshCw,
+  ShieldAlert, Shield, ShieldCheck,
+  Plus, Pencil, Trash2, X, Check, AlertTriangle,
+} from "lucide-react";
 import clsx from "clsx";
-import type { TransformRule, TransformRulesResponse, SensitivityLevel } from "@/lib/types";
+import type {
+  TransformRule,
+  TransformRulesResponse,
+  SensitivityLevel,
+  RuleUpsertRequest,
+} from "@/lib/types";
 
 // ── Classification display config ──────────────────────────────────
 
@@ -52,6 +61,8 @@ const TYPE_BADGE: Record<string, string> = {
 
 const SECTION_ORDER: SensitivityLevel[] = ["HIGH_SENSITIVE", "MEDIUM", "LOW", "UNCLASSIFIED"];
 
+const ALL_OPS = ["TOKENIZE", "MASK", "HMAC", "HASH", "PASSTHROUGH"] as const;
+
 function groupByClassification(rules: TransformRule[]): Record<string, TransformRule[]> {
   return rules.reduce<Record<string, TransformRule[]>>((acc, rule) => {
     const key = rule.classification ?? "UNCLASSIFIED";
@@ -61,14 +72,402 @@ function groupByClassification(rules: TransformRule[]): Record<string, Transform
   }, {});
 }
 
-// ── Component ──────────────────────────────────────────────────────
+// ── Blank form ─────────────────────────────────────────────────────
+
+const BLANK_FORM: RuleUpsertRequest = {
+  name: "",
+  type: "masking",
+  template: "",
+  tweak_source: "internal",
+  allowed_roles: ["tnt-engine"],
+  classification: "MEDIUM",
+  allowed_operations: ["TOKENIZE"],
+  description: "",
+  retention_days: null,
+};
+
+// ── Rule Form Modal ────────────────────────────────────────────────
+
+function RuleFormModal({
+  initial,
+  isEdit,
+  onClose,
+  onSaved,
+}: {
+  initial: RuleUpsertRequest;
+  isEdit: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState<RuleUpsertRequest>(initial);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const set = <K extends keyof RuleUpsertRequest>(k: K, v: RuleUpsertRequest[K]) =>
+    setForm((prev) => ({ ...prev, [k]: v }));
+
+  const toggleOp = (op: string) => {
+    const ops = form.allowed_operations.includes(op)
+      ? form.allowed_operations.filter((o) => o !== op)
+      : [...form.allowed_operations, op];
+    set("allowed_operations", ops);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.name.trim()) { setError("Field name is required"); return; }
+    if (form.allowed_operations.length === 0) { setError("Select at least one operation"); return; }
+    setSaving(true);
+    setError(null);
+    try {
+      const url = isEdit ? `/api/transforms/${encodeURIComponent(initial.name)}` : "/api/transforms";
+      const res = await fetch(url, {
+        method: isEdit ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const detail = data.detail ?? data.error ?? "Unknown error";
+        setError(typeof detail === "string" ? detail : JSON.stringify(detail));
+        return;
+      }
+      onSaved();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-bold text-white">
+            {isEdit ? "Edit Rule" : "New Transform Rule"}
+          </h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Field name */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Field name</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => set("name", e.target.value.toLowerCase().replace(/\s+/g, "_"))}
+              disabled={isEdit}
+              placeholder="e.g. national_id"
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-purple-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+            {isEdit && <p className="text-xs text-slate-600 mt-1">Field name cannot be changed after creation.</p>}
+          </div>
+
+          {/* Description */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Description</label>
+            <input
+              type="text"
+              value={form.description}
+              onChange={(e) => set("description", e.target.value)}
+              placeholder="Human-readable label"
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+            />
+          </div>
+
+          {/* Classification */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Sensitivity classification</label>
+            <select
+              value={form.classification}
+              onChange={(e) => set("classification", e.target.value as SensitivityLevel)}
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500"
+            >
+              <option value="HIGH_SENSITIVE">HIGH_SENSITIVE — TOKENIZE only</option>
+              <option value="MEDIUM">MEDIUM — TOKENIZE / MASK / HASH</option>
+              <option value="LOW">LOW — all operations</option>
+              <option value="UNCLASSIFIED">UNCLASSIFIED</option>
+            </select>
+          </div>
+
+          {/* Allowed operations */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Allowed operations</label>
+            <div className="flex flex-wrap gap-2">
+              {ALL_OPS.map((op) => {
+                const active = form.allowed_operations.includes(op);
+                return (
+                  <button
+                    key={op}
+                    type="button"
+                    onClick={() => toggleOp(op)}
+                    className={clsx(
+                      "px-2.5 py-1 rounded text-xs font-mono transition-colors border",
+                      active
+                        ? "bg-purple-600/30 border-purple-500 text-purple-300"
+                        : "bg-slate-800 border-slate-600 text-slate-500 hover:border-slate-500"
+                    )}
+                  >
+                    {active && <Check className="inline w-3 h-3 mr-1" />}
+                    {op}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Type + template row */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Transform type</label>
+              <select
+                value={form.type}
+                onChange={(e) => set("type", e.target.value as RuleUpsertRequest["type"])}
+                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500"
+              >
+                <option value="masking">masking</option>
+                <option value="fpe">fpe (format-preserving)</option>
+                <option value="hash">hash</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Mask template</label>
+              <input
+                type="text"
+                value={form.template}
+                onChange={(e) => set("template", e.target.value)}
+                placeholder="e.g. ***-**-####"
+                className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+              />
+            </div>
+          </div>
+
+          {/* Tweak source */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Tweak source</label>
+            <select
+              value={form.tweak_source}
+              onChange={(e) => set("tweak_source", e.target.value)}
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500"
+            >
+              <option value="internal">internal (auto-generated)</option>
+              <option value="supplied">supplied (caller provides)</option>
+            </select>
+          </div>
+
+          {/* Retention */}
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Retention (days, blank = indefinite)</label>
+            <input
+              type="number"
+              min={1}
+              value={form.retention_days ?? ""}
+              onChange={(e) => set("retention_days", e.target.value ? Number(e.target.value) : null)}
+              placeholder="e.g. 365"
+              className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-purple-500"
+            />
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div className="mt-4 flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-sm text-red-400">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex justify-end gap-3 mt-6">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 transition-colors"
+          >
+            {saving ? "Saving…" : isEdit ? "Save changes" : "Create rule"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Delete Confirm Modal ───────────────────────────────────────────
+
+function DeleteConfirmModal({
+  rule,
+  onClose,
+  onDeleted,
+}: {
+  rule: TransformRule;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/transforms/${encodeURIComponent(rule.name)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail ?? data.error ?? "Delete failed");
+        return;
+      }
+      onDeleted();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-sm bg-slate-900 border border-red-500/30 rounded-2xl shadow-2xl p-6 mx-4">
+        <div className="flex items-center gap-3 mb-3">
+          <AlertTriangle className="w-6 h-6 text-red-400 shrink-0" />
+          <h2 className="text-lg font-bold text-white">Delete Rule</h2>
+        </div>
+        <p className="text-sm text-slate-400 mb-2">
+          Are you sure you want to delete the rule{" "}
+          <span className="font-mono text-white">{rule.name}</span>?
+        </p>
+        <p className="text-xs text-slate-600 mb-5">
+          The rule will be soft-deleted and removed from the live governance registry immediately.
+          Existing tokens using this field type are not affected.
+        </p>
+        {error && (
+          <div className="mb-4 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+            {error}
+          </div>
+        )}
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 transition-colors"
+          >
+            {deleting ? "Deleting…" : "Delete rule"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Rule Card ──────────────────────────────────────────────────────
+
+function RuleCard({
+  rule,
+  levelConfig,
+  isLive,
+  onEdit,
+  onDelete,
+}: {
+  rule: TransformRule;
+  levelConfig: typeof LEVEL_CONFIG[SensitivityLevel];
+  isLive: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className={clsx(
+      "rounded-xl border bg-slate-800/50 p-4 flex items-start gap-4 hover:bg-slate-800/70 transition-colors group",
+      levelConfig.border,
+    )}>
+      {/* Name + type + description */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <h3 className="font-mono font-bold text-white">{rule.name}</h3>
+          <span className={clsx("px-2 py-0.5 rounded text-xs font-mono", TYPE_BADGE[rule.type] ?? TYPE_BADGE.hash)}>
+            {rule.type.toUpperCase()}
+          </span>
+          <span className={clsx("px-2 py-0.5 rounded text-xs font-medium", levelConfig.badge)}>
+            {levelConfig.label}
+          </span>
+        </div>
+        <p className="text-xs text-slate-400 mb-2">{rule.description || <span className="italic text-slate-600">No description</span>}</p>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-slate-500">Allowed:</span>
+          {rule.allowed_operations.map((op) => (
+            <span key={op} className={clsx("px-1.5 py-0.5 rounded text-xs font-mono", levelConfig.opColor)}>
+              {op}
+            </span>
+          ))}
+        </div>
+        {rule.retention_days != null && (
+          <p className="text-xs text-slate-600 mt-1">Retention: {rule.retention_days}d</p>
+        )}
+      </div>
+
+      {/* Template + tweak + actions */}
+      <div className="flex flex-col items-end gap-2 shrink-0">
+        {rule.template && (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-mono text-slate-500 text-xs">input</span>
+            <ArrowRight className="w-3.5 h-3.5 text-slate-600" />
+            <span className="font-mono text-emerald-400 text-xs">{rule.template}</span>
+          </div>
+        )}
+        <span className="text-xs text-slate-600">tweak: {rule.tweak_source}</span>
+
+        {/* Edit / Delete — only shown when engine is live */}
+        {isLive && (
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
+            <button
+              onClick={onEdit}
+              title="Edit rule"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onDelete}
+              title="Delete rule"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ──────────────────────────────────────────────────────
 
 export default function TransformsPage() {
   const [data, setData] = useState<TransformRulesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = async (showRefresh = false) => {
+  // Modal state
+  const [showForm, setShowForm] = useState(false);
+  const [editRule, setEditRule] = useState<TransformRule | null>(null);
+  const [deleteRule, setDeleteRule] = useState<TransformRule | null>(null);
+
+  const load = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
     try {
@@ -79,14 +478,56 @@ export default function TransformsPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [load]);
 
   const grouped = data ? groupByClassification(data.rules) : {};
+  const isLive = data?.source === "live";
+
+  const handleSaved = () => {
+    setShowForm(false);
+    setEditRule(null);
+    load(true);
+  };
+
+  const handleDeleted = () => {
+    setDeleteRule(null);
+    load(true);
+  };
 
   return (
     <div className="max-w-5xl">
+      {/* Modals */}
+      {(showForm || editRule) && (
+        <RuleFormModal
+          initial={editRule
+            ? {
+                name: editRule.name,
+                type: editRule.type,
+                template: editRule.template,
+                tweak_source: editRule.tweak_source,
+                allowed_roles: editRule.allowed_roles,
+                classification: editRule.classification,
+                allowed_operations: editRule.allowed_operations,
+                description: editRule.description,
+                retention_days: editRule.retention_days ?? null,
+              }
+            : BLANK_FORM
+          }
+          isEdit={!!editRule}
+          onClose={() => { setShowForm(false); setEditRule(null); }}
+          onSaved={handleSaved}
+        />
+      )}
+      {deleteRule && (
+        <DeleteConfirmModal
+          rule={deleteRule}
+          onClose={() => setDeleteRule(null)}
+          onDeleted={handleDeleted}
+        />
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-3">
@@ -98,16 +539,26 @@ export default function TransformsPage() {
           {data && (
             <span className={clsx(
               "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium",
-              data.source === "live"
+              isLive
                 ? "bg-green-500/15 text-green-400 border border-green-500/25"
                 : "bg-amber-500/15 text-amber-400 border border-amber-500/25"
             )}>
-              {data.source === "live"
-                ? <Wifi className="w-3 h-3" />
-                : <WifiOff className="w-3 h-3" />}
-              {data.source === "live" ? "Live — Engine connected" : "Fallback — Engine unreachable"}
+              {isLive ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+              {isLive ? "Live — Engine connected" : "Fallback — Engine unreachable"}
             </span>
           )}
+
+          {/* Add rule button — only when live */}
+          {isLive && (
+            <button
+              onClick={() => { setEditRule(null); setShowForm(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Add rule
+            </button>
+          )}
+
           <button
             onClick={() => load(true)}
             disabled={refreshing}
@@ -120,9 +571,10 @@ export default function TransformsPage() {
       </div>
 
       <p className="text-sm text-slate-400 mb-1">
-        Canonical PII field classifications enforced by the T&T Engine governance layer.
-        Rules mirror <code className="text-slate-300 bg-slate-700/50 px-1 rounded">classification.py</code> +{" "}
-        <code className="text-slate-300 bg-slate-700/50 px-1 rounded">masking.py</code>.
+        PII field classification rules enforced by the T&T Engine governance layer.
+        {isLive
+          ? " Rules are stored in the database and applied live — changes take effect immediately."
+          : " Showing read-only fallback — connect the engine to manage rules."}
       </p>
       {data && (
         <p className="text-xs text-slate-600 mb-6">
@@ -147,6 +599,17 @@ export default function TransformsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Fallback notice */}
+      {data && !isLive && (
+        <div className="mb-6 flex items-start gap-2 bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-3 text-sm text-amber-400">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            Engine is unreachable — showing built-in default rules (read-only).
+            Connect the T&T Engine to add, edit, or delete rules.
+          </span>
         </div>
       )}
 
@@ -186,7 +649,14 @@ export default function TransformsPage() {
                 </div>
                 <div className="space-y-2">
                   {grouped[level].map((rule) => (
-                    <RuleCard key={rule.name} rule={rule} levelConfig={cfg} />
+                    <RuleCard
+                      key={rule.name}
+                      rule={rule}
+                      levelConfig={cfg}
+                      isLive={isLive}
+                      onEdit={() => { setShowForm(false); setEditRule(rule); }}
+                      onDelete={() => setDeleteRule(rule)}
+                    />
                   ))}
                 </div>
               </section>
@@ -194,53 +664,6 @@ export default function TransformsPage() {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-function RuleCard({
-  rule,
-  levelConfig,
-}: {
-  rule: TransformRule;
-  levelConfig: typeof LEVEL_CONFIG[SensitivityLevel];
-}) {
-  return (
-    <div className={clsx(
-      "rounded-xl border bg-slate-800/50 p-4 flex items-start gap-4 hover:bg-slate-800/70 transition-colors",
-      levelConfig.border,
-    )}>
-      {/* Name + type + description */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1 flex-wrap">
-          <h3 className="font-mono font-bold text-white">{rule.name}</h3>
-          <span className={clsx("px-2 py-0.5 rounded text-xs font-mono", TYPE_BADGE[rule.type] ?? TYPE_BADGE.hash)}>
-            {rule.type.toUpperCase()}
-          </span>
-          <span className={clsx("px-2 py-0.5 rounded text-xs font-medium", levelConfig.badge)}>
-            {levelConfig.label}
-          </span>
-        </div>
-        <p className="text-xs text-slate-400 mb-2">{rule.description}</p>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs text-slate-500">Allowed:</span>
-          {rule.allowed_operations.map((op) => (
-            <span key={op} className={clsx("px-1.5 py-0.5 rounded text-xs font-mono", levelConfig.opColor)}>
-              {op}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {/* Template + tweak */}
-      <div className="flex flex-col items-end gap-2 shrink-0">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="font-mono text-slate-500 text-xs">input</span>
-          <ArrowRight className="w-3.5 h-3.5 text-slate-600" />
-          <span className="font-mono text-emerald-400 text-xs">{rule.template}</span>
-        </div>
-        <span className="text-xs text-slate-600">tweak: {rule.tweak_source}</span>
-      </div>
     </div>
   );
 }

@@ -10,8 +10,12 @@ at the ingress level.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+from tnt_engine.governance.classification import ClassificationRegistry, FieldClassification, SensitivityLevel
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -221,6 +225,157 @@ async def list_tokens(
         "limit": limit,
     }
 
+
+# ── Transform Rules (dynamic, DB-backed) ─────────────────────────────
+
+class RuleUpsert(BaseModel):
+    name: str
+    type: Literal["fpe", "masking", "hash"]
+    template: str = ""
+    tweak_source: str = "internal"
+    allowed_roles: list[str] = ["tnt-engine"]
+    classification: Literal["HIGH_SENSITIVE", "MEDIUM", "LOW", "UNCLASSIFIED"]
+    allowed_operations: list[str]
+    description: str = ""
+    retention_days: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_slug(cls, v: str) -> str:
+        v = v.strip().lower().replace(" ", "_")
+        if not v:
+            raise ValueError("name must not be empty")
+        return v
+
+    @field_validator("allowed_operations")
+    @classmethod
+    def ops_not_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("allowed_operations must contain at least one operation")
+        valid = {"TOKENIZE", "MASK", "HMAC", "HASH", "PASSTHROUGH"}
+        invalid = set(v) - valid
+        if invalid:
+            raise ValueError(f"unknown operations: {invalid}")
+        return [op.upper() for op in v]
+
+
+async def _get_db_or_503(request: Request):
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database not available")
+    return db
+
+
+@admin_router.get("/rules")
+async def list_rules(request: Request) -> dict:
+    """List all active transform rules from the database."""
+    db = await _get_db_or_503(request)
+    rows = await db.read_pool.fetch(
+        """
+        SELECT id, name, type, template, tweak_source, allowed_roles,
+               classification, allowed_operations, description, retention_days,
+               is_active, created_at, updated_at
+        FROM transform_rules
+        WHERE is_active = true
+        ORDER BY
+            CASE classification
+                WHEN 'HIGH_SENSITIVE' THEN 1
+                WHEN 'MEDIUM' THEN 2
+                WHEN 'LOW' THEN 3
+                ELSE 4
+            END, name
+        """
+    )
+    rules = []
+    for row in rows:
+        r = dict(row)
+        for k, v in r.items():
+            if hasattr(v, "isoformat"):
+                r[k] = v.isoformat()
+        rules.append(r)
+    return {"rules": rules, "count": len(rules)}
+
+
+@admin_router.post("/rules", status_code=201)
+async def create_rule(body: RuleUpsert, request: Request) -> dict:
+    """Create a new transform rule and register it in the live governance registry."""
+    db = await _get_db_or_503(request)
+    governance: ClassificationRegistry = request.app.state.governance
+
+    try:
+        await db.pool.execute(
+            """
+            INSERT INTO transform_rules
+                (name, type, template, tweak_source, allowed_roles,
+                 classification, allowed_operations, description, retention_days)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            """,
+            body.name, body.type, body.template, body.tweak_source,
+            body.allowed_roles, body.classification, body.allowed_operations,
+            body.description, body.retention_days,
+        )
+    except Exception as exc:
+        if "unique" in str(exc).lower():
+            raise HTTPException(status_code=409, detail=f"Rule '{body.name}' already exists")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    governance.register(FieldClassification(
+        field_type=body.name,
+        level=SensitivityLevel(body.classification),
+        description=body.description,
+        retention_days=body.retention_days,
+    ))
+    return {"status": "created", "name": body.name}
+
+
+@admin_router.put("/rules/{name}")
+async def update_rule(name: str, body: RuleUpsert, request: Request) -> dict:
+    """Update an existing transform rule and refresh the live governance registry."""
+    db = await _get_db_or_503(request)
+    governance: ClassificationRegistry = request.app.state.governance
+
+    result = await db.pool.execute(
+        """
+        UPDATE transform_rules SET
+            type = $2, template = $3, tweak_source = $4, allowed_roles = $5,
+            classification = $6, allowed_operations = $7, description = $8,
+            retention_days = $9
+        WHERE name = $1 AND is_active = true
+        """,
+        name, body.type, body.template, body.tweak_source, body.allowed_roles,
+        body.classification, body.allowed_operations, body.description,
+        body.retention_days,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail=f"Rule '{name}' not found")
+
+    governance.register(FieldClassification(
+        field_type=name,
+        level=SensitivityLevel(body.classification),
+        description=body.description,
+        retention_days=body.retention_days,
+    ))
+    return {"status": "updated", "name": name}
+
+
+@admin_router.delete("/rules/{name}")
+async def delete_rule(name: str, request: Request) -> dict:
+    """Soft-delete a transform rule and remove it from the live governance registry."""
+    db = await _get_db_or_503(request)
+    governance: ClassificationRegistry = request.app.state.governance
+
+    result = await db.pool.execute(
+        "UPDATE transform_rules SET is_active = false WHERE name = $1 AND is_active = true",
+        name,
+    )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail=f"Rule '{name}' not found")
+
+    governance.deregister(name)
+    return {"status": "deleted", "name": name}
+
+
+# ── Audit Query ───────────────────────────────────────────────────────
 
 class AuditQueryParams(BaseModel):
     tenant_id: str = ""
