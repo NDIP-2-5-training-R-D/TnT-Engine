@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { FileText, RefreshCw, Download, Filter, X, Shield, Wifi, WifiOff } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { FileText, RefreshCw, Download, Filter, X, Shield } from "lucide-react";
 import clsx from "clsx";
 import type { CpAuditEntry } from "@/lib/cp-audit";
 
@@ -61,18 +61,12 @@ export default function AuditPage() {
   const [data, setData] = useState<AuditData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("engine");
-  const [sseConnected, setSseConnected] = useState(false);
-  const [liveEvents, setLiveEvents] = useState<CpAuditEntry[]>([]);
 
   // Engine filters
   const [tenant, setTenant] = useState("");
   const [action, setAction] = useState("");
   const [limit, setLimit] = useState(50);
   const [showFilters, setShowFilters] = useState(false);
-
-  const esRef = useRef<EventSource | null>(null);
-
-  // ── Data fetch (engine entries + CP entries from store) ──────────
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -87,53 +81,16 @@ export default function AuditPage() {
     setLoading(false);
   }, [tenant, action, limit]);
 
-  // Poll engine entries every 10s; CP entries come via SSE in real-time
+  // Poll both engine and control-plane entries over HTTP to avoid long-lived SSE connections.
   useEffect(() => {
     fetchData();
     const t = setInterval(fetchData, 10_000);
     return () => clearInterval(t);
   }, [fetchData]);
 
-  // ── SSE subscription for real-time CP events ─────────────────────
-
-  useEffect(() => {
-    const es = new EventSource("/api/events");
-    esRef.current = es;
-
-    es.onopen = () => setSseConnected(true);
-    es.onerror = () => setSseConnected(false);
-
-    es.onmessage = (e) => {
-      try {
-        const event = JSON.parse(e.data);
-        if (event.type === "CONNECTED") return;
-        // Prepend live event to CP list (will be deduplicated on next fetch)
-        const entry: CpAuditEntry = {
-          id: `live_${Date.now()}`,
-          action: event.type,
-          performed_by: event.performed_by,
-          role: "",
-          target: event.target,
-          result: event.result,
-          detail: event.detail,
-          performed_at: event.timestamp,
-        };
-        setLiveEvents((prev) => [entry, ...prev].slice(0, 100));
-        // Refresh stored CP entries after a short delay (file write completes)
-        setTimeout(fetchData, 500);
-      } catch { /* ignore malformed */ }
-    };
-
-    return () => {
-      es.close();
-      setSseConnected(false);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── Derived data ─────────────────────────────────────────────────
 
-  // Merge stored CP entries with any live entries not yet persisted
-  const cpEntries: CpAuditEntry[] = data?.cp_entries ?? liveEvents;
+  const cpEntries: CpAuditEntry[] = data?.cp_entries ?? [];
 
   const handleExport = (format: string) => {
     const params = new URLSearchParams();
@@ -153,16 +110,6 @@ export default function AuditPage() {
         <div className="flex items-center gap-3">
           <FileText className="w-6 h-6 text-vault-blue" />
           <h1 className="text-xl font-bold text-white">Audit Log</h1>
-          {/* SSE indicator */}
-          <span className={clsx(
-            "flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border",
-            sseConnected
-              ? "text-emerald-400 border-emerald-500/30 bg-emerald-500/10"
-              : "text-slate-500 border-slate-700 bg-slate-800/50"
-          )}>
-            {sseConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
-            {sseConnected ? "Live" : "Offline"}
-          </span>
         </div>
         <div className="flex items-center gap-2">
           {/* Export buttons (engine entries) */}
@@ -351,7 +298,7 @@ export default function AuditPage() {
       )}
 
       <p className="text-xs text-slate-600 mt-2 text-right">
-        Engine entries: polling 10s · CP entries: {sseConnected ? "real-time via SSE" : "SSE disconnected — refresh manually"}
+        Engine entries: polling 10s · Control Plane entries: polling 10s
       </p>
     </div>
   );

@@ -35,6 +35,7 @@ export interface CpAuditEntry {
 
 const STORE_PATH = process.env.CP_AUDIT_STORE_PATH || join(tmpdir(), "tnt-cp-audit.json");
 const MAX_ENTRIES = 1000; // rotate when exceeded
+const MAX_DETAIL_LENGTH = 120;
 
 // ── Storage helpers ────────────────────────────────────────────────
 
@@ -53,12 +54,18 @@ function generateId(): string {
   return `cp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
 
+function sanitizeDetail(detail: string | undefined): string | undefined {
+  if (!detail) return undefined;
+  return detail.slice(0, MAX_DETAIL_LENGTH);
+}
+
 // ── Public API ─────────────────────────────────────────────────────
 
 /** Record a Control Plane action. Call after the action completes (success or failure). */
 export function logCpAction(entry: Omit<CpAuditEntry, "id" | "performed_at">): CpAuditEntry {
   const record: CpAuditEntry = {
     ...entry,
+    detail: sanitizeDetail(entry.detail),
     id: generateId(),
     performed_at: new Date().toISOString(),
   };

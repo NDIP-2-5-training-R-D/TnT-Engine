@@ -71,9 +71,7 @@ export async function POST(request: NextRequest) {
 
     if (res.status === 204 || res.ok) {
       const { logCpAction } = await import("@/lib/cp-audit");
-      const { emitCpEvent } = await import("@/lib/event-bus");
       logCpAction({ action: "SEAL", performed_by: auth.user!.username, role: auth.user!.role, result: "success" });
-      emitCpEvent({ type: "SEAL", performed_by: auth.user!.username, result: "success" });
 
       return NextResponse.json({
         success: true,

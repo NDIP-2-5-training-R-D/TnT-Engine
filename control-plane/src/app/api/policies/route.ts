@@ -96,9 +96,7 @@ export async function POST(request: NextRequest) {
 
     if (res.ok || res.status === 204) {
       const { logCpAction } = await import("@/lib/cp-audit");
-      const { emitCpEvent } = await import("@/lib/event-bus");
       logCpAction({ action: "POLICY_CREATE", performed_by: auth.user!.username, role: auth.user!.role, target: body.name, result: "success" });
-      emitCpEvent({ type: "POLICY_CREATE", performed_by: auth.user!.username, target: body.name, result: "success" });
       return NextResponse.json({ success: true, message: `Policy '${body.name}' saved.` });
     }
     const { logCpAction: log } = await import("@/lib/cp-audit");

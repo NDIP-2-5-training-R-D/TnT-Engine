@@ -70,9 +70,7 @@ export async function POST(request: NextRequest) {
 
       try {
         const { logCpAction } = await import("@/lib/cp-audit");
-        const { emitCpEvent } = await import("@/lib/event-bus");
         logCpAction({ action: "KEY_ROTATE", performed_by: auth.user!.username, role: auth.user!.role, target: keyName, result: "success", detail: `New version: ${newVersion}` });
-        emitCpEvent({ type: "KEY_ROTATE", performed_by: auth.user!.username, target: keyName, result: "success", detail: `New version: ${newVersion}` });
       } catch { /* audit must never break the main flow */ }
 
       return NextResponse.json({

@@ -146,7 +146,7 @@
 | [200] Success | 300,000 (100%) |
 | [5xx] Error | 0 |
 
-**Nhận xét:** Ổn định hoàn toàn trong ~10 phút. Không có memory leak, không degradation. P99 181ms — cao hơn Docker (67ms) do port-forward overhead nhưng vẫn trong ngưỡng chấp nhận được.
+**Nhận xét:** Ổn định hoàn toàn trong ~10 phút trong môi trường local. P99 181ms cao hơn Docker (67ms), nhưng số liệu này vẫn bị ảnh hưởng bởi `kubectl port-forward`, nên chỉ dùng để tham khảo sơ bộ.
 
 ### Tổng hợp Lần 2
 
@@ -168,26 +168,46 @@
 | Spike | 2,712 | 1,261 | 1,003ms | 3,927ms |
 | Soak | 1,235 | 502 | 67ms | 181ms |
 
-**K8s chậm hơn ~2x** do `port-forward` thêm proxy tunnel vào mỗi request — không phải K8s kém hơn Docker.
+**Lưu ý:** K8s local trong bài test này chậm hơn Docker local, nhưng chưa thể quy kết cho Kubernetes vì đường truy cập đang đi qua `kubectl port-forward`.
 
 ---
 
-## Thông số điều chỉnh được từ 2 lần test
+## Phạm vi áp dụng của kết quả hiện tại
 
-### Đã điều chỉnh (có cơ sở từ test)
+Các số liệu trong tài liệu này mới phản ánh:
+
+- Docker Compose local.
+- Kubernetes local.
+- Truy cập qua `localhost` hoặc `kubectl port-forward`.
+
+Các số liệu này **chưa đủ cơ sở để chốt production sizing** vì còn thiếu:
+
+- network thật giữa app, OpenBao, PostgreSQL, Redis;
+- ingress/load balancer thật;
+- CPU/RAM thật của VM triển khai;
+- ảnh hưởng của Kubernetes service routing và resource contention;
+- hành vi thực của OpenBao/DB/cache khi tách node.
+
+---
+
+## Thông số chỉ nên xem là tạm thời
+
+### Đã quan sát được từ local test
 
 | Thông số | Trước | Sau | Căn cứ |
 |---------|-------|-----|--------|
 | `memory request` | 512Mi | 128Mi | Docker stats: thực tế chỉ dùng ~94MB |
 | `memory limit` | 1Gi | 256Mi | Buffer 2.5x so với thực tế |
 
-File đã cập nhật: `helm/values-prod.yaml`
+**Trạng thái:** Không nên áp dụng trực tiếp cho production trước khi benchmark lại trên VM/cluster thật.
 
-### Đã điều chỉnh qua test K8s local (LoadBalancer)
+### Quan sát sơ bộ từ test scale local
 
 | Thông số | Giá trị | Căn cứ |
 |---------|---------|--------|
 | `minReplicas` | 5 | Test spike 5 pods → 48.7% success (từ 28%) |
+
+**Trạng thái:** Đây là quan sát định hướng, chưa phải cấu hình production cuối cùng.
 
 ### Chưa thể điều chỉnh (cần cluster thật)
 
@@ -200,31 +220,33 @@ File đã cập nhật: `helm/values-prod.yaml`
 
 ---
 
-## Kết luận
+## Kết luận tạm thời
 
-### Điểm mạnh (xác nhận qua test)
-- Ổn định 100% ở tải bình thường (≤100 concurrent)
-- Không có memory leak, không degradation theo thời gian (soak 300k requests)
-- Backpressure hoạt động đúng — bảo vệ hệ thống khi overload
-- Deploy thành công lên K8s, health check pass ✓
+### Điều đã quan sát được trong môi trường local
+- Ổn định 100% ở tải bình thường (≤100 concurrent) trong local test.
+- Chưa thấy dấu hiệu memory leak trong soak test local 300k requests.
+- Backpressure hoạt động đúng trong điều kiện local overload.
+- Deploy thành công lên K8s local, health check pass.
 
-### Giới hạn xác định được
-- Ngưỡng backpressure: **200 concurrent** → vượt qua bị 503
-- Throughput tối đa: **~1,100–1,235 req/s** trên 1 pod (Docker local)
-- Bottleneck: **OpenBao crypto layer** — throughput không tăng dù tăng concurrent
+### Giả thuyết cần xác nhận thêm trên VM/cluster thật
+- Ngưỡng backpressure `200 concurrent` có thể hợp lý cho HTTP request/response thông thường.
+- Throughput local của 1 pod đang nằm khoảng `~1,100–1,235 req/s`.
+- OpenBao có khả năng là bottleneck chính, nhưng cần đo lại khi tách hạ tầng thật.
 
 ### Cần bổ sung
-- Chạy lại 4 bài test trên **cluster thật** của công ty (không dùng port-forward)
-- Đo `docker stats` trong lúc chạy **load test** (không chỉ soak) để có CPU baseline chính xác hơn
-- Setup HPA theo custom metric `tnt_inflight_requests` thay vì CPU (cần KEDA hoặc Prometheus Adapter)
-- Scale OpenBao theo shard tenant khi traffic thực vượt ~1,200 req/s
+- Chạy lại 4 bài test trên **VM GEIC hoặc cluster thật** của công ty.
+- Truy cập qua **LoadBalancer hoặc Ingress**, không dùng `port-forward`.
+- Đo resource của app, OpenBao, PostgreSQL, Redis trong lúc chạy benchmark.
+- Xác nhận lại memory sizing trước khi giảm `requests/limits` cho production.
+- Chỉ quyết định HPA theo CPU hay custom metric sau khi có số đo thật.
+- Đánh giá tăng CPU/RAM hoặc cấu hình cluster cho OpenBao trước khi nghĩ đến sharding tenant.
 
 ---
 
 ## Cải thiện Spike — Kết quả 3 hướng test
 
 ### Bối cảnh
-Spike test (500 concurrent) cho thấy tỉ lệ thành công chỉ 28% (1 pod, Docker). Bottleneck được xác định là **OpenBao crypto layer** — throughput tối đa ~1,200 req/s bất kể concurrent hay số pod.
+Spike test (500 concurrent) cho thấy tỉ lệ thành công chỉ 28% (1 pod, Docker). Hiện tại có dấu hiệu crypto layer là điểm nghẽn chính, nhưng đây vẫn là kết luận sơ bộ từ local test.
 
 ### Hướng 1 — Tăng backpressure threshold (đã test, bác bỏ)
 
@@ -237,7 +259,7 @@ Spike test (500 concurrent) cho thấy tỉ lệ thành công chỉ 28% (1 pod, 
 | Req/s | 2,712 | 1,233 |
 | Connection reset | 0 | ~170 lỗi |
 
-**Kết luận:** Tệ hơn. Tăng threshold khiến 400 request xếp hàng chờ OpenBao → latency tăng vọt, connection reset. Reject nhanh (503) tốt hơn timeout chậm. **Giữ nguyên threshold 200.**
+**Kết luận tạm thời:** Trong local test, tăng threshold làm kết quả xấu hơn. Tạm thời chưa có cơ sở tăng ngưỡng này trước khi benchmark lại trên VM.
 
 ---
 
@@ -252,7 +274,7 @@ Spike test (500 concurrent) cho thấy tỉ lệ thành công chỉ 28% (1 pod, 
 | Req/s | 2,712 | 1,411 |
 | Connection reset | 0 | 0 |
 
-**Kết luận:** Success rate tăng gần gấp đôi. Vẫn còn 51% shed vì OpenBao là 1 instance duy nhất shared giữa tất cả pod — throughput crypto không scale theo số pod. **Đây là hướng hiệu quả nhất hiện tại.**
+**Kết luận tạm thời:** Success rate tăng đáng kể trong local K8s test. Tuy nhiên vẫn cần xác nhận lại trên hạ tầng thật trước khi chốt `minReplicas` cho production.
 
 ---
 
