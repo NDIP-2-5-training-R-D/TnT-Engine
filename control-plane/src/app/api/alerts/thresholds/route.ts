@@ -175,7 +175,7 @@ export async function GET(request: NextRequest) {
   if (auth.error) return auth.error;
 
   const [thresholds, snapshot] = await Promise.all([
-    Promise.resolve(getThresholds()),
+    getThresholds(),
     fetchMetricsSnapshot(),
   ]);
 
@@ -224,7 +224,7 @@ export async function PUT(request: NextRequest) {
   if (body.critical !== undefined) patch.critical = Number(body.critical);
   if (body.enabled  !== undefined) patch.enabled  = Boolean(body.enabled);
 
-  const updated = updateThreshold(body.id, patch);
+  const updated = await updateThreshold(body.id, patch);
   if (!updated) {
     return NextResponse.json({ error: `Threshold '${body.id}' not found` }, { status: 404 });
   }
@@ -239,6 +239,6 @@ export async function DELETE(request: NextRequest) {
   const auth = await requireRole(request, ["admin"]);
   if (auth.error) return auth.error;
 
-  const thresholds = resetToDefaults();
+  const thresholds = await resetToDefaults();
   return NextResponse.json({ success: true, thresholds, reset_at: new Date().toISOString() });
 }

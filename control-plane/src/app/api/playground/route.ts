@@ -18,11 +18,11 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import type { SensitivityLevel } from "@/lib/types";
 
-const TNT_URL = (process.env.TNT_ENGINE_URL || "http://localhost:8000").replace(/\/$/, "");
-const SANDBOX_TENANT = "sandbox";
-const MAX_VALUE_BYTES = 1_024;
-const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 10;
+const TNT_URL        = (process.env.TNT_ENGINE_URL || "http://localhost:8000").replace(/\/$/, "");
+const SANDBOX_TENANT = process.env.PLAYGROUND_SANDBOX_TENANT ?? "sandbox";
+const MAX_VALUE_BYTES = parseInt(process.env.PLAYGROUND_MAX_VALUE_BYTES ?? "1024", 10);
+const RATE_WINDOW_MS  = parseInt(process.env.PLAYGROUND_RATE_WINDOW_MS  ?? "60000", 10);
+const RATE_MAX        = parseInt(process.env.PLAYGROUND_RATE_MAX        ?? "10", 10);
 
 // ── Per-user in-memory rate limiter ────────────────────────────────
 

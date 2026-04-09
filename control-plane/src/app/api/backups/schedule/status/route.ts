@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth.error) return auth.error;
 
-  const schedule = getSchedule();
+  const schedule = await getSchedule();
   const now = Date.now();
 
   // Derive next_run_at — use stored value if present, otherwise compute it

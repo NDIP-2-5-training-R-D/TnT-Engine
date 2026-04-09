@@ -19,10 +19,8 @@ export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth.error) return auth.error;
 
-  return NextResponse.json({
-    backups: listBackups(30),
-    schedule: getSchedule(),
-  });
+  const [backups, schedule] = await Promise.all([listBackups(30), getSchedule()]);
+  return NextResponse.json({ backups, schedule });
 }
 
 export async function POST(request: NextRequest) {
@@ -35,7 +33,7 @@ export async function POST(request: NextRequest) {
 
   // Update schedule config
   if (body.operation === "update_schedule") {
-    const config = updateSchedule({
+    const config = await updateSchedule({
       enabled: body.enabled,
       interval_hours: body.interval_hours,
       retention_count: body.retention_count,
@@ -63,7 +61,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (!res.ok) {
-        const record = recordBackup({
+        const record = await recordBackup({
           timestamp: new Date().toISOString(),
           size_bytes: 0,
           checksum_sha256: "",
@@ -87,7 +85,7 @@ export async function POST(request: NextRequest) {
       mkdirSync("/tmp/tnt-vault-backups", { recursive: true });
       writeFileSync(storagePath, buffer);
 
-      const record = recordBackup({
+      const record = await recordBackup({
         timestamp: new Date().toISOString(),
         size_bytes: buffer.length,
         checksum_sha256: checksum,
@@ -109,7 +107,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({ success: true, backup: record });
     } catch (err) {
-      const record = recordBackup({
+      const record = await recordBackup({
         timestamp: new Date().toISOString(),
         size_bytes: 0,
         checksum_sha256: "",

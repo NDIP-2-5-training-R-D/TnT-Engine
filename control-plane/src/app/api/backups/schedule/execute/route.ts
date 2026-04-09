@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
   } catch { /* body is optional */ }
 
   // Load schedule
-  const schedule = getSchedule();
+  const schedule = await getSchedule();
 
   // Guard: enabled?
   if (!schedule.enabled) {
@@ -139,7 +139,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     // Network / timeout error
-    const record = recordBackup({
+    const record = await recordBackup({
       timestamp: new Date().toISOString(),
       size_bytes: 0,
       checksum_sha256: "",
@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       duration_ms: Date.now() - t0,
       error: String(err),
     });
-    recordScheduledRun("failed");
+    await recordScheduledRun("failed");
     return NextResponse.json(
       { executed: true, error: String(err), backup: record },
       { status: 502 }
@@ -159,7 +159,7 @@ export async function POST(request: NextRequest) {
 
   if (!snapshotRes.ok) {
     const errMsg = `Vault HTTP ${snapshotRes.status}`;
-    const record = recordBackup({
+    const record = await recordBackup({
       timestamp: new Date().toISOString(),
       size_bytes: 0,
       checksum_sha256: "",
@@ -170,7 +170,7 @@ export async function POST(request: NextRequest) {
       duration_ms: Date.now() - t0,
       error: errMsg,
     });
-    recordScheduledRun("failed");
+    await recordScheduledRun("failed");
     return NextResponse.json(
       { executed: true, error: errMsg, backup: record },
       { status: 502 }
@@ -189,7 +189,7 @@ export async function POST(request: NextRequest) {
   writeFileSync(storagePath, buffer);
 
   // Record metadata
-  const record = recordBackup({
+  const record = await recordBackup({
     timestamp: new Date().toISOString(),
     size_bytes: buffer.length,
     checksum_sha256: checksum,
@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
   });
 
   // Update schedule run tracking
-  recordScheduledRun("success");
+  await recordScheduledRun("success");
 
   // Enforce retention: delete old .snap files beyond retention_count
   await enforceRetention(schedule.retention_count);

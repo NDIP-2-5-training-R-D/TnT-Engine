@@ -9,6 +9,7 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { getPgPool, type QueryResultRow } from "./db";
 
 export type CpAction =
   | "KEY_ROTATE"
@@ -32,23 +33,14 @@ export interface CpAuditEntry {
   performed_at: string;
 }
 
-type QueryResultRow = Record<string, unknown>;
-
-type PgPool = {
-  query: (sql: string, params?: unknown[]) => Promise<{ rows: QueryResultRow[] }>;
-};
-
 const STORE_PATH = process.env.CP_AUDIT_STORE_PATH || join(tmpdir(), "tnt-cp-audit.json");
 const STORE_MODE = (process.env.CP_AUDIT_STORE || "file").toLowerCase();
 const MAX_ENTRIES = 1000;
 const MAX_DETAIL_LENGTH = 120;
-const PG_SSL = (process.env.PG_SSL || "false").toLowerCase() === "true";
 
 // ── Global singletons ──────────────────────────────────────────────────
 
 declare global {
-  // eslint-disable-next-line no-var
-  var __tnt_cp_audit_pool: PgPool | undefined;
   // eslint-disable-next-line no-var
   var __tnt_cp_audit_schema_ready: Promise<void> | undefined;
 }
@@ -80,32 +72,6 @@ function sanitizeDetail(detail: string | undefined): string | undefined {
 }
 
 // ── PostgreSQL helpers ─────────────────────────────────────────────────
-
-function databaseUrl(): string {
-  if (process.env.CP_AUDIT_DATABASE_URL) return process.env.CP_AUDIT_DATABASE_URL;
-
-  const user = encodeURIComponent(process.env.PG_USER || "tnt");
-  const password = encodeURIComponent(process.env.PG_PASSWORD || "tnt_secret");
-  const host = process.env.PG_HOST || "localhost";
-  const port = process.env.PG_PORT || "5432";
-  const database = process.env.PG_DATABASE || "tnt_engine";
-
-  return `postgresql://${user}:${password}@${host}:${port}/${database}`;
-}
-
-async function getPgPool(): Promise<PgPool> {
-  if (!globalThis.__tnt_cp_audit_pool) {
-    const pgModule = (await import("pg")) as {
-      Pool: new (config: { connectionString: string; ssl: false | { rejectUnauthorized: boolean } }) => PgPool;
-    };
-    globalThis.__tnt_cp_audit_pool = new pgModule.Pool({
-      connectionString: databaseUrl(),
-      ssl: PG_SSL ? { rejectUnauthorized: false } : false,
-    });
-  }
-
-  return globalThis.__tnt_cp_audit_pool;
-}
 
 async function ensurePgSchema(): Promise<void> {
   if (!globalThis.__tnt_cp_audit_schema_ready) {
