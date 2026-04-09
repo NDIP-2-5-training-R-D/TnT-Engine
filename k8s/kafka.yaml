@@ -12,18 +12,21 @@ metadata:
   name: kafka-config
   namespace: tnt-engine
 data:
-  KAFKA_CFG_PROCESS_ROLES: "broker,controller"
-  KAFKA_CFG_NODE_ID: "1"
-  KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka-0.kafka-headless.tnt-engine.svc.cluster.local:9093"
-  KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-  KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://kafka.tnt-engine.svc.cluster.local:9092"
-  KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
-  KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-  KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-  KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
-  KAFKA_CFG_LOG_RETENTION_HOURS: "168"
-  KAFKA_CFG_LOG_SEGMENT_BYTES: "104857600"
-  ALLOW_PLAINTEXT_LISTENER: "yes"
+  # apache/kafka image format (no KAFKA_CFG_ prefix)
+  KAFKA_NODE_ID: "1"
+  KAFKA_PROCESS_ROLES: "broker,controller"
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-0.kafka-headless.tnt-engine.svc.cluster.local:9093"
+  KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+  KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka.tnt-engine.svc.cluster.local:9092"
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+  KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+  KAFKA_LOG_RETENTION_HOURS: "168"
+  KAFKA_LOG_SEGMENT_BYTES: "104857600"
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
 ---
 # Headless service for StatefulSet DNS (kafka-0.kafka-headless...)
 apiVersion: v1
@@ -79,11 +82,11 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1001
-        fsGroup: 1001
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: kafka
-          image: bitnami/kafka:3.9.0
+          image: apache/kafka:latest
           ports:
             - name: broker
               containerPort: 9092
@@ -102,7 +105,7 @@ spec:
           readinessProbe:
             exec:
               command:
-                - kafka-topics.sh
+                - /opt/kafka/bin/kafka-topics.sh
                 - --bootstrap-server
                 - localhost:9092
                 - --list
@@ -113,7 +116,7 @@ spec:
           livenessProbe:
             exec:
               command:
-                - kafka-topics.sh
+                - /opt/kafka/bin/kafka-topics.sh
                 - --bootstrap-server
                 - localhost:9092
                 - --list
@@ -123,7 +126,7 @@ spec:
             failureThreshold: 3
           volumeMounts:
             - name: kafka-data
-              mountPath: /bitnami/kafka
+              mountPath: /var/lib/kafka/data
   volumeClaimTemplates:
     - metadata:
         name: kafka-data
