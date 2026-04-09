@@ -190,6 +190,7 @@ function RuleFormModal({
             <p className="text-xs text-slate-500 mt-1">You can track it in the Approvals page.</p>
           </div>
         ) : (
+        <>
         <div className="space-y-4">
           {/* Field name */}
           <div>
@@ -355,6 +356,7 @@ function RuleFormModal({
               : isEdit ? "Save changes" : "Create rule"}
           </button>
         </div>
+        </>
         )}
       </div>
     </div>
