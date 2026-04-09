@@ -233,7 +233,9 @@ export async function POST(req: NextRequest) {
         signal: AbortSignal.timeout(10_000),
       });
       const latency = Date.now() - startMs;
-      const resBody = await engineRes.json() as Record<string, unknown>;
+      const rawText = await engineRes.text();
+      let resBody: Record<string, unknown> = {};
+      try { resBody = JSON.parse(rawText); } catch { resBody = { detail: rawText || `HTTP ${engineRes.status}` }; }
 
       if (!engineRes.ok) {
         return NextResponse.json(
@@ -282,7 +284,9 @@ export async function POST(req: NextRequest) {
       signal: AbortSignal.timeout(10_000),
     });
     const latency = Date.now() - startMs;
-    const resBody = await engineRes.json() as Record<string, unknown>;
+    const rawText2 = await engineRes.text();
+    let resBody: Record<string, unknown> = {};
+    try { resBody = JSON.parse(rawText2); } catch { resBody = { detail: rawText2 || `HTTP ${engineRes.status}` }; }
 
     if (!engineRes.ok) {
       return NextResponse.json(
