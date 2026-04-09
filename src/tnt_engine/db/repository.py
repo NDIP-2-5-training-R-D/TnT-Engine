@@ -241,9 +241,10 @@ class TokenRepository:
 
     @_track("cleanup_dedup")
     async def cleanup_dedup(self, max_age_seconds: int = 3600) -> int:
+        from datetime import timedelta
         row = await self._db.pool.fetchrow(
             "SELECT cleanup_dedup($1::interval) AS cnt",
-            f"{max_age_seconds} seconds",
+            timedelta(seconds=max_age_seconds),
         )
         return row["cnt"]
 
