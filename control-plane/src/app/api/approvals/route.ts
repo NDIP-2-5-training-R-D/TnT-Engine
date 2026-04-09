@@ -4,8 +4,8 @@
 // POST: Create new approval request or review (approve/reject) an existing one
 //
 // RBAC:
-//   - Create request: admin or operator
-//   - Approve/reject: admin ONLY (and cannot be same user as requester)
+//   - Create request: admin, manager, or requester (requester can only submit ROLE_ASSIGNMENT)
+//   - Approve/reject: admin or manager ONLY (and cannot be same user as requester)
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
 
   // ── Create a new request ─────────────────────────────────────
   if (body.operation === "create") {
-    const auth = await requireRole(request, ["admin", "operator"]);
+    const auth = await requireRole(request, ["admin", "manager", "requester"]);
     if (auth.error) return auth.error;
 
     const { action, target, reason } = body;
@@ -51,9 +51,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "action, target, and reason are required" }, { status: 400 });
     }
 
-    const validActions: ApprovalAction[] = ["SEAL", "KEY_ROTATE", "KEY_DELETE", "POLICY_DELETE"];
-    if (!validActions.includes(action)) {
-      return NextResponse.json({ error: `Invalid action. Must be: ${validActions.join(", ")}` }, { status: 400 });
+    const allValidActions: ApprovalAction[] = ["SEAL", "KEY_ROTATE", "KEY_DELETE", "POLICY_DELETE", "ROLE_ASSIGNMENT"];
+    const requesterAllowed: ApprovalAction[] = ["ROLE_ASSIGNMENT"];
+
+    if (!allValidActions.includes(action)) {
+      return NextResponse.json({ error: `Invalid action. Must be: ${allValidActions.join(", ")}` }, { status: 400 });
+    }
+
+    // requester can only submit ROLE_ASSIGNMENT requests
+    if (auth.user!.role === "requester" && !requesterAllowed.includes(action)) {
+      return NextResponse.json(
+        { error: "requester role can only submit ROLE_ASSIGNMENT requests" },
+        { status: 403 }
+      );
     }
 
     const req = createApproval(action, target, auth.user!.username, auth.user!.role, reason);
@@ -71,7 +81,7 @@ export async function POST(request: NextRequest) {
 
   // ── Review (approve/reject) ──────────────────────────────────
   if (body.operation === "review") {
-    const auth = await requireRole(request, ["admin"]);
+    const auth = await requireRole(request, ["admin", "manager"]);
     if (auth.error) return auth.error;
 
     const { id, decision, review_reason } = body;
@@ -86,7 +96,7 @@ export async function POST(request: NextRequest) {
 
     // If approved, execute the action
     if (decision === "approved" && result.request) {
-      const execResult = await executeApprovedAction(result.request.action, result.request.target);
+      const execResult = await executeApprovedAction(result.request.action, result.request.target, result.request.requested_by);
       markExecuted(result.request.id);
       const { logCpAction } = await import("@/lib/cp-audit");
       await logCpAction({
@@ -127,7 +137,8 @@ export async function POST(request: NextRequest) {
 
 async function executeApprovedAction(
   action: ApprovalAction,
-  target: string
+  target: string,
+  requestedBy: string
 ): Promise<{ success: boolean; message: string }> {
   try {
     switch (action) {
@@ -148,6 +159,32 @@ async function executeApprovedAction(
       case "POLICY_DELETE":
         await vaultPut(`/sys/policies/acl/${target}`, undefined);
         return { success: true, message: `Policy '${target}' deleted via approved request` };
+
+      case "ROLE_ASSIGNMENT": {
+        // target format: "username:role" — assign the requested role to the user
+        const [username, role] = target.split(":");
+        if (!username || !role) {
+          return { success: false, message: "ROLE_ASSIGNMENT target must be 'username:role'" };
+        }
+        const { listUsers, updateUser, createUser } = await import("@/lib/user-store");
+        const users = listUsers();
+        const existing = users.find((u) => u.username === username);
+        if (existing) {
+          updateUser(existing.id, { role: role as import("@/lib/types").Role });
+          return { success: true, message: `Role '${role}' assigned to user '${username}'` };
+        }
+        // If user doesn't exist, create with a placeholder password (force change on login)
+        const bcrypt = await import("bcryptjs");
+        const tempHash = await bcrypt.hash(`${username}-tmp-${Date.now()}`, 10);
+        createUser({
+          username,
+          passwordHash: tempHash,
+          role: role as import("@/lib/types").Role,
+          displayName: username,
+          created_by: requestedBy,
+        });
+        return { success: true, message: `User '${username}' created with role '${role}'` };
+      }
 
       default:
         return { success: false, message: `Unknown action: ${action}` };

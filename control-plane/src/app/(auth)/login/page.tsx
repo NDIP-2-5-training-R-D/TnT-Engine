@@ -89,8 +89,8 @@ export default function LoginPage() {
           <p className="text-[10px] text-slate-600 uppercase tracking-wider mb-2">Dev Credentials</p>
           <div className="space-y-1 text-xs font-mono text-slate-500">
             <p><span className="text-slate-400">admin</span> / admin123 — Full access</p>
-            <p><span className="text-slate-400">operator</span> / oper123 — Operations</p>
-            <p><span className="text-slate-400">viewer</span> / view123 — Read only</p>
+            <p><span className="text-slate-400">manager</span> / mgr123 — Namespace Manager</p>
+            <p><span className="text-slate-400">requester</span> / req123 — Request only</p>
           </div>
         </div>
       </div>

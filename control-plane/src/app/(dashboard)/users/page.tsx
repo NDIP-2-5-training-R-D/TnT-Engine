@@ -22,7 +22,7 @@ import clsx from "clsx";
 interface ManagedUser {
   id: string;
   username: string;
-  role: "admin" | "operator" | "viewer";
+  role: "admin" | "manager" | "requester";
   displayName: string;
   status: "active" | "inactive";
   created_at: string;
@@ -62,8 +62,8 @@ function formatDate(iso?: string): string {
 function RoleBadge({ role }: { role: ManagedUser["role"] }) {
   const styles: Record<ManagedUser["role"], string> = {
     admin: "bg-rose-500/15 text-rose-300 border border-rose-500/25",
-    operator: "bg-blue-500/15 text-blue-300 border border-blue-500/25",
-    viewer: "bg-slate-700 text-slate-400 border border-slate-600",
+    manager: "bg-blue-500/15 text-blue-300 border border-blue-500/25",
+    requester: "bg-slate-700 text-slate-400 border border-slate-600",
   };
   return (
     <span
@@ -255,7 +255,7 @@ interface AddUserFormProps {
 function AddUserForm({ onSuccess, onCancel }: AddUserFormProps) {
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
-  const [role, setRole] = useState<ManagedUser["role"]>("viewer");
+  const [role, setRole] = useState<ManagedUser["role"]>("requester");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [usernameError, setUsernameError] = useState<string | null>(null);
@@ -349,8 +349,8 @@ function AddUserForm({ onSuccess, onCancel }: AddUserFormProps) {
             onChange={(e) => setRole(e.target.value as ManagedUser["role"])}
             className="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-lg text-sm text-white focus:outline-none focus:border-slate-400"
           >
-            <option value="viewer">viewer</option>
-            <option value="operator">operator</option>
+            <option value="requester">requester</option>
+            <option value="manager">manager</option>
             <option value="admin">admin</option>
           </select>
         </div>
@@ -487,8 +487,8 @@ function UserRow({
             className="px-2 py-1 bg-slate-800 border border-slate-600 rounded text-xs text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed focus:outline-none focus:border-slate-400"
             title={isSelf ? "Cannot change your own role" : "Edit role"}
           >
-            <option value="viewer">viewer</option>
-            <option value="operator">operator</option>
+            <option value="requester">requester</option>
+            <option value="manager">manager</option>
             <option value="admin">admin</option>
           </select>
 
@@ -847,6 +847,10 @@ export default function UsersPage() {
           <span>
             {users.filter((u) => u.role === "admin").length} admin
             {users.filter((u) => u.role === "admin").length !== 1 ? "s" : ""}
+          </span>
+          <span>
+            {users.filter((u) => u.role === "manager").length} manager
+            {users.filter((u) => u.role === "manager").length !== 1 ? "s" : ""}
           </span>
         </div>
       )}

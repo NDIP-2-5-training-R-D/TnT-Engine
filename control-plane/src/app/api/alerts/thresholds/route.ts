@@ -205,7 +205,7 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   const { requireRole } = await import("@/lib/rbac");
-  const auth = await requireRole(request, ["admin", "operator"]);
+  const auth = await requireRole(request, ["admin", "manager"]);
   if (auth.error) return auth.error;
 
   let body: { id: string; warning?: number; critical?: number; enabled?: boolean };

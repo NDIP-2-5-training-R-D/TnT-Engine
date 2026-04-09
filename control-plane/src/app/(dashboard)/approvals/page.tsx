@@ -36,7 +36,7 @@ export default function ApprovalsPage() {
   const [actionLoading, setActionLoading] = useState(false);
 
   const currentUser = (session?.user as any)?.username || "";
-  const currentRole = (session?.user as any)?.role || "viewer";
+  const currentRole = (session?.user as any)?.role || "requester";
 
   const fetchRequests = useCallback(async () => {
     try {
@@ -93,7 +93,7 @@ export default function ApprovalsPage() {
           {pendingRequests.map((req) => {
             const cfg = statusConfig[req.status] || statusConfig.pending;
             const Icon = cfg.icon;
-            const canReview = currentRole === "admin" && req.requested_by !== currentUser;
+            const canReview = (currentRole === "admin" || currentRole === "manager") && req.requested_by !== currentUser;
             const isReviewing = reviewingId === req.id;
 
             return (
@@ -135,8 +135,8 @@ export default function ApprovalsPage() {
                   </div>
                 )}
 
-                {!canReview && currentRole !== "admin" && (
-                  <p className="mt-2 text-xs text-slate-600">Only admins can approve/reject requests</p>
+                {!canReview && currentRole === "requester" && (
+                  <p className="mt-2 text-xs text-slate-600">Only admin or manager can approve/reject requests</p>
                 )}
               </div>
             );

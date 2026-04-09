@@ -3,7 +3,7 @@
 //
 // Proxies to T&T Engine GET /admin/tokens.
 // Returns safe metadata only — no plaintext, no ciphertext.
-// RBAC: admin or operator (viewer has no lifecycle access).
+// RBAC: admin or manager (requester has no lifecycle access).
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +13,7 @@ import { requireRole } from "@/lib/rbac";
 const TNT_URL = process.env.TNT_ENGINE_URL || "http://localhost:8000";
 
 export async function GET(request: NextRequest) {
-  const auth = await requireRole(request, ["admin", "operator"]);
+  const auth = await requireRole(request, ["admin", "manager"]);
   if (auth.error) return auth.error;
 
   const { searchParams } = request.nextUrl;
