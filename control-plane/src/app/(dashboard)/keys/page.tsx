@@ -60,7 +60,59 @@ function RotateConfirm({ keyName, onDone }: { keyName: string; onDone: () => voi
   );
 }
 
-function KeyCard({ k, canWrite, onRefresh }: { k: TransitKeyInfo; canWrite: boolean; onRefresh: () => void }) {
+function ApprovalRotateModal({ keyName, onClose }: { keyName: string; onClose: () => void }) {
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async () => {
+    if (!reason.trim()) { setError("Reason is required"); return; }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/approvals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operation: "create", action: "KEY_ROTATE", target: keyName, reason: reason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "Failed to submit"); return; }
+      setSubmitted(true);
+      setTimeout(onClose, 2000);
+    } catch (e) { setError(String(e)); }
+    finally { setSubmitting(false); }
+  };
+
+  return (
+    <div className="p-3 bg-slate-800 rounded-lg border border-amber-500/30 space-y-2">
+      {submitted ? (
+        <p className="text-sm text-vault-green text-center py-1">Request submitted for approval ✓</p>
+      ) : (
+        <>
+          <p className="text-xs text-amber-400">Submit rotation request for <span className="font-mono text-white">{keyName}</span></p>
+          <textarea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            rows={2}
+            placeholder="Why is key rotation needed?"
+            className="w-full px-2 py-1.5 bg-slate-900 border border-slate-600 rounded text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 resize-none"
+          />
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 py-1 bg-slate-700 rounded text-xs text-slate-300">Cancel</button>
+            <button onClick={handleSubmit} disabled={submitting}
+              className="px-3 py-1 bg-amber-600/20 border border-amber-500/40 rounded text-xs text-amber-400 disabled:opacity-50">
+              {submitting ? "..." : "Submit for Approval"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function KeyCard({ k, approvalMode, onRefresh }: { k: TransitKeyInfo; approvalMode: boolean; onRefresh: () => void }) {
   const [showRotate, setShowRotate] = useState(false);
 
   return (
@@ -78,16 +130,24 @@ function KeyCard({ k, canWrite, onRefresh }: { k: TransitKeyInfo; canWrite: bool
         <div><span className="text-slate-500">Encrypt:</span> <span className={k.supports_encryption ? "text-vault-green" : "text-slate-600"}>{k.supports_encryption ? "Yes" : "No"}</span></div>
         <div><span className="text-slate-500">Deletable:</span> <span className={k.deletion_allowed ? "text-vault-red" : "text-vault-green"}>{k.deletion_allowed ? "Yes" : "No"}</span></div>
       </div>
-      {canWrite && (showRotate ? (
-        <RotateConfirm keyName={k.name} onDone={() => { setShowRotate(false); onRefresh(); }} />
+      {showRotate ? (
+        approvalMode
+          ? <ApprovalRotateModal keyName={k.name} onClose={() => setShowRotate(false)} />
+          : <RotateConfirm keyName={k.name} onDone={() => { setShowRotate(false); onRefresh(); }} />
       ) : (
         <button
           onClick={() => setShowRotate(true)}
-          className="flex items-center gap-2 px-3 py-1.5 bg-vault-yellow/10 border border-vault-yellow/30 rounded-lg text-vault-yellow text-sm hover:bg-vault-yellow/20 transition-colors"
+          className={clsx(
+            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors",
+            approvalMode
+              ? "bg-amber-600/10 border border-amber-500/30 text-amber-400 hover:bg-amber-600/20"
+              : "bg-vault-yellow/10 border border-vault-yellow/30 text-vault-yellow hover:bg-vault-yellow/20"
+          )}
         >
-          <RotateCw className="w-3.5 h-3.5" /> Rotate Key
+          <RotateCw className="w-3.5 h-3.5" />
+          {approvalMode ? "Request Rotation" : "Rotate Key"}
         </button>
-      ))}
+      )}
     </div>
   );
 }
@@ -96,6 +156,7 @@ export default function KeysPage() {
   const { data: session } = useSession();
   const role = (session?.user as { role?: string })?.role ?? "requester";
   const canWrite = role === "admin" || role === "manager";
+  const approvalMode = role === "requester";
 
   const { data, isLoading, mutate } = useTransitKeys();
   const [backupStatus, setBackupStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
@@ -148,7 +209,7 @@ export default function KeysPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {data.map((k) => <KeyCard key={k.name} k={k} canWrite={canWrite} onRefresh={() => mutate()} />)}
+          {data.map((k) => <KeyCard key={k.name} k={k} approvalMode={approvalMode} onRefresh={() => mutate()} />)}
         </div>
       )}
     </div>

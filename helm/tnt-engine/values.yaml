@@ -169,16 +169,6 @@ config:
   TNT_WORKER_CLEANUP_BATCH_SIZE: "1000"
   TNT_WORKER_REENCRYPT_BATCH_SIZE: "500"
   TNT_WORKER_CACHE_REBUILD_BATCH_SIZE: "2000"
-  # Kafka audit backend
-  # Set TNT_AUDIT_BACKEND=kafka (and deploy kafka.yaml) to enable durable K8s audit
-  TNT_AUDIT_BACKEND: "postgres"
-  TNT_KAFKA_BROKERS: "kafka.tnt-engine.svc.cluster.local:9092"
-  TNT_KAFKA_TOPIC_AUDIT: "tnt-audit-events"
-  TNT_KAFKA_CONSUMER_GROUP: "tnt-audit-pg-writer"
-  TNT_KAFKA_SECURITY_PROTOCOL: "PLAINTEXT"
-  TNT_KAFKA_PRODUCER_ACKS: "all"
-  TNT_KAFKA_PRODUCER_LINGER_MS: "50"
-  TNT_KAFKA_CONSUMER_MAX_POLL_RECORDS: "500"
 
 # ── Secrets (keys only — values from GitLab CI or External Secrets) ──
 

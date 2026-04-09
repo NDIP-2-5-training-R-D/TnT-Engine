@@ -6,8 +6,7 @@ WORKDIR /build
 # Install build deps only (cached layer for dependencies)
 COPY pyproject.toml ./
 COPY src/ ./src/
-# Install with kafka extra so aiokafka is available for TNT_AUDIT_BACKEND=kafka
-RUN pip install --no-cache-dir --prefix=/install ".[kafka]"
+RUN pip install --no-cache-dir --prefix=/install "."
 
 # ── Stage 2: Production image ───────────────────────────────────────
 FROM python:3.12-slim AS runtime

@@ -96,35 +96,12 @@ class Settings(BaseSettings):
     dedup_ttl_seconds: int = 3600
 
     # Audit delivery
-    # audit_backend: "postgres" (default) | "kafka"
-    audit_backend: str = "postgres"
     audit_buffer_max_size: int = 5000
     audit_flush_interval_seconds: float = 2.0
     audit_flush_batch_size: int = 500
     audit_max_retries: int = 3
     audit_retry_backoff_seconds: float = 1.0
     audit_dlq_path: str = "/tmp/tnt-audit-dlq.jsonl"
-
-    # Kafka (used when audit_backend = "kafka")
-    # TNT_KAFKA_BROKERS: comma-separated list, e.g. "kafka1:9092,kafka2:9092"
-    kafka_brokers: str = "localhost:9092"
-    kafka_topic_audit: str = "tnt-audit-events"
-    kafka_consumer_group: str = "tnt-audit-pg-writer"
-    # PLAINTEXT | SSL | SASL_PLAINTEXT | SASL_SSL
-    kafka_security_protocol: str = "PLAINTEXT"
-    kafka_sasl_mechanism: str = "PLAIN"
-    kafka_sasl_username: str = ""
-    kafka_sasl_password: str = ""
-    # Path to CA cert for SSL/SASL_SSL
-    kafka_ssl_ca_cert: str = ""
-    # Producer tuning
-    kafka_producer_acks: str = "all"        # "all" | "1" | "0"
-    kafka_producer_linger_ms: int = 50      # batch window
-    kafka_producer_max_batch_size: int = 524288  # 512 KiB
-    # Consumer tuning
-    kafka_consumer_max_poll_records: int = 500
-    kafka_consumer_session_timeout_ms: int = 30000
-    kafka_consumer_heartbeat_interval_ms: int = 10000
 
     # Workers
     worker_cleanup_interval_seconds: int = 60

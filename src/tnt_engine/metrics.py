@@ -142,24 +142,6 @@ REENCRYPT_PLAINTEXT_EXPOSURE = Histogram(
 # to avoid circular imports. This module provides the dependency-level
 # metrics that those don't cover.
 
-# ── Kafka audit metrics ──────────────────────────────────────────────
-
-KAFKA_PRODUCE_TOTAL = Counter(
-    "tnt_kafka_audit_produce_total",
-    "Kafka audit produce attempts",
-    ["topic", "status"],  # status: "success" | "failure"
-)
-KAFKA_PRODUCE_ERRORS = Counter(
-    "tnt_kafka_audit_produce_errors_total",
-    "Kafka audit produce errors",
-    ["topic"],
-)
-KAFKA_CONSUMER_LAG = Gauge(
-    "tnt_kafka_audit_consumer_lag",
-    "Kafka consumer lag for audit topic",
-    ["topic", "group"],
-)
-
 # ── Build info ───────────────────────────────────────────────────────
 
 BUILD_INFO = Info("tnt_engine", "T&T Engine build information")

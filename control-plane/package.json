@@ -44,7 +44,6 @@
     "typescript": "^5.5.0"
   },
   "optionalDependencies": {
-    "kafkajs": "^2.2.4",
     "ldapts": "^8.1.7"
   }
 }

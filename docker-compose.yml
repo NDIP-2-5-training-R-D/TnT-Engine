@@ -44,39 +44,6 @@ services:
       retries: 3
       start_period: 10s
 
-  # Kafka (KRaft mode — no Zookeeper) — only starts with: docker compose --profile kafka up
-  kafka:
-    profiles: ["kafka"]
-    image: apache/kafka:latest
-    ports:
-      - "9092:9092"
-    environment:
-      # KRaft — single node combined broker + controller (apache/kafka image format)
-      KAFKA_NODE_ID: "1"
-      KAFKA_PROCESS_ROLES: "broker,controller"
-      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
-      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
-      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-      # Topic auto-creation + retention
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_LOG_RETENTION_HOURS: "168"
-      KAFKA_LOG_SEGMENT_BYTES: "104857600"
-      # Single-node replication factors
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
-    healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    volumes:
-      - kafka-data:/var/lib/kafka/data
-
   # T&T Engine — the Python app itself
   tnt-engine:
     build:
@@ -97,12 +64,6 @@ services:
       TNT_CRYPTO_BACKEND: "openbao"
       TNT_CRYPTO_VERIFY_SSL: "false"
       TNT_ENVIRONMENT: "development"
-      # Kafka audit — set TNT_AUDIT_BACKEND=kafka to enable
-      # (requires: docker compose --profile kafka up)
-      TNT_AUDIT_BACKEND: "${TNT_AUDIT_BACKEND:-postgres}"
-      TNT_KAFKA_BROKERS: "kafka:9092"
-      TNT_KAFKA_TOPIC_AUDIT: "tnt-audit-events"
-      TNT_KAFKA_CONSUMER_GROUP: "tnt-audit-pg-writer"
     depends_on:
       postgres:
         condition: service_healthy
@@ -159,4 +120,3 @@ services:
 volumes:
   pgdata:
   softhsm-tokens:
-  kafka-data:

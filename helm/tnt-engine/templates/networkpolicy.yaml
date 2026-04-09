@@ -49,13 +49,6 @@ spec:
               app: openbao
       ports:
         - port: 8200
-    # Kafka (audit events)
-    - to:
-        - podSelector:
-            matchLabels:
-              app: kafka
-      ports:
-        - port: 9092
     # DNS
     - to: []
       ports:

@@ -92,17 +92,21 @@ const BLANK_FORM: RuleUpsertRequest = {
 function RuleFormModal({
   initial,
   isEdit,
+  approvalMode,
   onClose,
   onSaved,
 }: {
   initial: RuleUpsertRequest;
   isEdit: boolean;
+  approvalMode: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [form, setForm] = useState<RuleUpsertRequest>(initial);
+  const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
   const set = <K extends keyof RuleUpsertRequest>(k: K, v: RuleUpsertRequest[K]) =>
     setForm((prev) => ({ ...prev, [k]: v }));
@@ -117,22 +121,47 @@ function RuleFormModal({
   const handleSubmit = async () => {
     if (!form.name.trim()) { setError("Field name is required"); return; }
     if (form.allowed_operations.length === 0) { setError("Select at least one operation"); return; }
+    if (approvalMode && !reason.trim()) { setError("Reason is required for approval requests"); return; }
     setSaving(true);
     setError(null);
     try {
-      const url = isEdit ? `/api/transforms/${encodeURIComponent(initial.name)}` : "/api/transforms";
-      const res = await fetch(url, {
-        method: isEdit ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        const detail = data.detail ?? data.error ?? "Unknown error";
-        setError(typeof detail === "string" ? detail : JSON.stringify(detail));
-        return;
+      if (approvalMode) {
+        // Submit approval request instead of direct API call
+        const action = isEdit ? "RULE_UPDATE" : "RULE_CREATE";
+        const res = await fetch("/api/approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operation: "create",
+            action,
+            target: form.name || initial.name,
+            reason: reason.trim(),
+            payload: form,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error ?? "Failed to submit request");
+          return;
+        }
+        setSubmitted(true);
+        setTimeout(onClose, 2000);
+      } else {
+        // Direct execution (admin / manager)
+        const url = isEdit ? `/api/transforms/${encodeURIComponent(initial.name)}` : "/api/transforms";
+        const res = await fetch(url, {
+          method: isEdit ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(form),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const detail = data.detail ?? data.error ?? "Unknown error";
+          setError(typeof detail === "string" ? detail : JSON.stringify(detail));
+          return;
+        }
+        onSaved();
       }
-      onSaved();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -145,13 +174,22 @@ function RuleFormModal({
       <div className="w-full max-w-lg bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl p-6 mx-4 max-h-[90vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-lg font-bold text-white">
-            {isEdit ? "Edit Rule" : "New Transform Rule"}
+            {approvalMode
+              ? (isEdit ? "Request Rule Edit" : "Request New Rule")
+              : (isEdit ? "Edit Rule" : "New Transform Rule")}
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
             <X className="w-5 h-5" />
           </button>
         </div>
 
+        {submitted ? (
+          <div className="py-6 text-center">
+            <Check className="w-10 h-10 text-vault-green mx-auto mb-3" />
+            <p className="text-vault-green font-medium">Request submitted for manager approval</p>
+            <p className="text-xs text-slate-500 mt-1">You can track it in the Approvals page.</p>
+          </div>
+        ) : (
         <div className="space-y-4">
           {/* Field name */}
           <div>
@@ -273,6 +311,21 @@ function RuleFormModal({
           </div>
         </div>
 
+          {/* Reason — only for approval mode */}
+          {approvalMode && (
+            <div>
+              <label className="block text-xs font-medium text-amber-400 mb-1">Reason for request <span className="text-red-400">*</span></label>
+              <textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                rows={2}
+                placeholder="Why is this rule change needed?"
+                className="w-full bg-slate-800 border border-amber-500/40 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 resize-none"
+              />
+            </div>
+          )}
+        </div>
+
         {/* Error */}
         {error && (
           <div className="mt-4 flex items-start gap-2 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-sm text-red-400">
@@ -292,11 +345,17 @@ function RuleFormModal({
           <button
             onClick={handleSubmit}
             disabled={saving}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white disabled:opacity-50 transition-colors"
+            className={clsx(
+              "px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-colors",
+              approvalMode ? "bg-amber-600 hover:bg-amber-500" : "bg-purple-600 hover:bg-purple-500"
+            )}
           >
-            {saving ? "Saving…" : isEdit ? "Save changes" : "Create rule"}
+            {saving ? "Submitting…" : approvalMode
+              ? "Submit for Approval"
+              : isEdit ? "Save changes" : "Create rule"}
           </button>
         </div>
+        )}
       </div>
     </div>
   );
@@ -306,29 +365,46 @@ function RuleFormModal({
 
 function DeleteConfirmModal({
   rule,
+  approvalMode,
   onClose,
   onDeleted,
 }: {
   rule: TransformRule;
+  approvalMode: boolean;
   onClose: () => void;
   onDeleted: () => void;
 }) {
   const [deleting, setDeleting] = useState(false);
+  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
 
   const handleDelete = async () => {
+    if (approvalMode && !reason.trim()) { setError("Reason is required"); return; }
     setDeleting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/transforms/${encodeURIComponent(rule.name)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.detail ?? data.error ?? "Delete failed");
-        return;
+      if (approvalMode) {
+        const res = await fetch("/api/approvals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            operation: "create",
+            action: "RULE_DELETE",
+            target: rule.name,
+            reason: reason.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error ?? "Failed to submit request"); return; }
+        setSubmitted(true);
+        setTimeout(onClose, 2000);
+      } else {
+        const res = await fetch(`/api/transforms/${encodeURIComponent(rule.name)}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok) { setError(data.detail ?? data.error ?? "Delete failed"); return; }
+        onDeleted();
       }
-      onDeleted();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -339,38 +415,61 @@ function DeleteConfirmModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="w-full max-w-sm bg-slate-900 border border-red-500/30 rounded-2xl shadow-2xl p-6 mx-4">
-        <div className="flex items-center gap-3 mb-3">
-          <AlertTriangle className="w-6 h-6 text-red-400 shrink-0" />
-          <h2 className="text-lg font-bold text-white">Delete Rule</h2>
-        </div>
-        <p className="text-sm text-slate-400 mb-2">
-          Are you sure you want to delete the rule{" "}
-          <span className="font-mono text-white">{rule.name}</span>?
-        </p>
-        <p className="text-xs text-slate-600 mb-5">
-          The rule will be soft-deleted and removed from the live governance registry immediately.
-          Existing tokens using this field type are not affected.
-        </p>
-        {error && (
-          <div className="mb-4 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-            {error}
+        {submitted ? (
+          <div className="py-4 text-center">
+            <Check className="w-10 h-10 text-vault-green mx-auto mb-3" />
+            <p className="text-vault-green font-medium">Delete request submitted for approval</p>
           </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-3">
+              <AlertTriangle className="w-6 h-6 text-red-400 shrink-0" />
+              <h2 className="text-lg font-bold text-white">
+                {approvalMode ? "Request Rule Deletion" : "Delete Rule"}
+              </h2>
+            </div>
+            <p className="text-sm text-slate-400 mb-2">
+              {approvalMode ? "Submit a request to delete rule " : "Are you sure you want to delete the rule "}
+              <span className="font-mono text-white">{rule.name}</span>?
+            </p>
+            {approvalMode ? (
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-amber-400 mb-1">Reason <span className="text-red-400">*</span></label>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  rows={2}
+                  placeholder="Why should this rule be deleted?"
+                  className="w-full bg-slate-800 border border-amber-500/40 rounded-lg px-3 py-2 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500 resize-none"
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-slate-600 mb-5">
+                The rule will be soft-deleted and removed from the live governance registry immediately.
+              </p>
+            )}
+            {error && (
+              <div className="mb-4 text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
+            <div className="flex justify-end gap-3">
+              <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className={clsx(
+                  "px-4 py-2 rounded-lg text-sm font-medium text-white disabled:opacity-50 transition-colors",
+                  approvalMode ? "bg-amber-600 hover:bg-amber-500" : "bg-red-600 hover:bg-red-500"
+                )}
+              >
+                {deleting ? "Submitting…" : approvalMode ? "Submit for Approval" : "Delete rule"}
+              </button>
+            </div>
+          </>
         )}
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 transition-colors"
-          >
-            {deleting ? "Deleting…" : "Delete rule"}
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -382,14 +481,12 @@ function RuleCard({
   rule,
   levelConfig,
   isLive,
-  canWrite,
   onEdit,
   onDelete,
 }: {
   rule: TransformRule;
   levelConfig: typeof LEVEL_CONFIG[SensitivityLevel];
   isLive: boolean;
-  canWrite: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -434,8 +531,8 @@ function RuleCard({
         )}
         <span className="text-xs text-slate-600">tweak: {rule.tweak_source}</span>
 
-        {/* Edit / Delete — only shown when engine is live AND user can write */}
-        {isLive && canWrite && (
+        {/* Edit / Delete — shown when engine is live (requester submits approval) */}
+        {isLive && (
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
             <button
               onClick={onEdit}
@@ -463,7 +560,7 @@ function RuleCard({
 export default function TransformsPage() {
   const { data: session } = useSession();
   const role = (session?.user as { role?: string })?.role ?? "requester";
-  const canWrite = role === "admin" || role === "manager";
+  const approvalMode = role === "requester";
 
   const [data, setData] = useState<TransformRulesResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -523,6 +620,7 @@ export default function TransformsPage() {
             : BLANK_FORM
           }
           isEdit={!!editRule}
+          approvalMode={approvalMode}
           onClose={() => { setShowForm(false); setEditRule(null); }}
           onSaved={handleSaved}
         />
@@ -530,6 +628,7 @@ export default function TransformsPage() {
       {deleteRule && (
         <DeleteConfirmModal
           rule={deleteRule}
+          approvalMode={approvalMode}
           onClose={() => setDeleteRule(null)}
           onDeleted={handleDeleted}
         />
@@ -555,14 +654,17 @@ export default function TransformsPage() {
             </span>
           )}
 
-          {/* Add rule button — only when live AND user is admin/manager */}
-          {isLive && canWrite && (
+          {/* Add rule button — always visible when live; requester goes to approval */}
+          {isLive && (
             <button
               onClick={() => { setEditRule(null); setShowForm(true); }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white transition-colors"
+              className={clsx(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-colors",
+                approvalMode ? "bg-amber-600 hover:bg-amber-500" : "bg-purple-600 hover:bg-purple-500"
+              )}
             >
               <Plus className="w-4 h-4" />
-              Add rule
+              {approvalMode ? "Request rule" : "Add rule"}
             </button>
           )}
 
@@ -661,7 +763,6 @@ export default function TransformsPage() {
                       rule={rule}
                       levelConfig={cfg}
                       isLive={isLive}
-                      canWrite={canWrite}
                       onEdit={() => { setShowForm(false); setEditRule(rule); }}
                       onDelete={() => setDeleteRule(rule)}
                     />

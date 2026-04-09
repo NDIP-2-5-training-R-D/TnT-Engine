@@ -18,22 +18,31 @@
 import { readFileSync, writeFileSync, existsSync } from "fs";
 
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed" | "expired";
-export type ApprovalAction = "SEAL" | "KEY_ROTATE" | "KEY_DELETE" | "POLICY_DELETE" | "ROLE_ASSIGNMENT";
+export type ApprovalAction =
+  | "SEAL"
+  | "KEY_ROTATE"
+  | "KEY_DELETE"
+  | "POLICY_DELETE"
+  | "ROLE_ASSIGNMENT"
+  | "RULE_CREATE"
+  | "RULE_UPDATE"
+  | "RULE_DELETE";
 
 export interface ApprovalRequest {
   id: string;
   action: ApprovalAction;
-  target: string;           // key name, policy name, or "vault"
-  requested_by: string;     // username
+  target: string;                          // key name, rule name, policy name, or "vault"
+  requested_by: string;                    // username
   requested_by_role: string;
   reason: string;
+  payload?: Record<string, unknown>;       // rule data for RULE_CREATE / RULE_UPDATE
   status: ApprovalStatus;
   reviewed_by?: string;
   review_reason?: string;
   created_at: string;
   reviewed_at?: string;
   executed_at?: string;
-  expires_at: string;       // 1 hour from creation
+  expires_at: string;                      // 1 hour from creation
 }
 
 const STORE_PATH = process.env.APPROVAL_STORE_PATH || "/tmp/tnt-approvals.json";
@@ -66,7 +75,8 @@ export function createApproval(
   target: string,
   requestedBy: string,
   requestedByRole: string,
-  reason: string
+  reason: string,
+  payload?: Record<string, unknown>
 ): ApprovalRequest {
   const now = new Date();
   const request: ApprovalRequest = {
@@ -76,6 +86,7 @@ export function createApproval(
     requested_by: requestedBy,
     requested_by_role: requestedByRole,
     reason,
+    ...(payload ? { payload } : {}),
     status: "pending",
     created_at: now.toISOString(),
     expires_at: new Date(now.getTime() + EXPIRY_MS).toISOString(),

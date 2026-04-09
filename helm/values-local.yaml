@@ -64,8 +64,3 @@ config:
   TNT_CRYPTO_VERIFY_SSL: "false"
   TNT_ENVIRONMENT: "development"
   TNT_L1_MAX_SIZE: "1000"
-  # Kafka audit — enabled for local K8s (apply k8s/kafka.yaml first)
-  TNT_AUDIT_BACKEND: "kafka"
-  TNT_KAFKA_BROKERS: "kafka.tnt-engine.svc.cluster.local:9092"
-  TNT_KAFKA_TOPIC_AUDIT: "tnt-audit-events"
-  TNT_KAFKA_CONSUMER_GROUP: "tnt-audit-pg-writer"
