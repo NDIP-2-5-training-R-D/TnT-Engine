@@ -83,7 +83,7 @@ spec:
         fsGroup: 1001
       containers:
         - name: kafka
-          image: bitnami/kafka:3.9
+          image: bitnami/kafka:3.9.0
           ports:
             - name: broker
               containerPort: 9092
