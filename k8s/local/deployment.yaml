@@ -34,36 +34,6 @@ spec:
       terminationGracePeriodSeconds: 30
       serviceAccountName: tnt-engine
 
-      # Chờ postgres, redis, openbao sẵn sàng trước khi start
-      initContainers:
-        - name: wait-postgres
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              until nc -z postgres.tnt-engine.svc.cluster.local 5432; do
-                echo "Waiting for postgres..."; sleep 2;
-              done
-        - name: wait-redis
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              until nc -z redis.tnt-engine.svc.cluster.local 6379; do
-                echo "Waiting for redis..."; sleep 2;
-              done
-        - name: wait-openbao
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              until nc -z openbao.tnt-engine.svc.cluster.local 8200; do
-                echo "Waiting for openbao..."; sleep 2;
-              done
-
       containers:
         - name: tnt-engine
           image: tnt-engine:local
