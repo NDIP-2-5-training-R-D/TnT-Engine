@@ -34,11 +34,12 @@ services:
     environment:
       BAO_DEV_ROOT_TOKEN_ID: dev-token
       BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      BAO_ADDR: "http://127.0.0.1:8200"
     ports:
       - "8200:8200"
     command: server -dev
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:8200/v1/sys/health || exit 1"]
+      test: ["CMD", "bao", "status"]
       interval: 5s
       timeout: 5s
       retries: 15
