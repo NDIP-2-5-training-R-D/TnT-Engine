@@ -325,7 +325,6 @@ function RuleFormModal({
               />
             </div>
           )}
-        </div>
 
         {/* Error */}
         {error && (
