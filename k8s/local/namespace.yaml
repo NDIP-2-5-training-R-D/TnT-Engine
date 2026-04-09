@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tnt-engine
+  labels:
+    app.kubernetes.io/name: tnt-engine
+    environment: local

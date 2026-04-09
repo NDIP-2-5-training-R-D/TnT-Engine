@@ -1,4 +1,6 @@
-.PHONY: help dev test lint build push deploy rollback migrate backup
+.PHONY: help dev test lint build push deploy rollback migrate backup \
+        k8s-build k8s-up k8s-down k8s-init k8s-status k8s-logs \
+        k8s-port-forward k8s-restart k8s-shell k8s-migrate k8s-helm-local
 
 IMAGE ?= ghcr.io/thiennlinh/tnt-engine
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -147,3 +149,99 @@ exporters: ## Install DB + Redis exporters
 
 loadtest: ## Run load test (TYPE=baseline|load|spike|soak)
 	bash scripts/load-test.sh http://localhost:8000 $(TYPE)
+
+# ── Kubernetes (Docker Desktop) ──────────────────────────────────────
+
+K8S_LOCAL_DIR = k8s/local
+LOCAL_IMAGE   = tnt-engine:local
+
+k8s-build: ## Build Docker image cho local K8s (tag: tnt-engine:local)
+	docker build -t $(LOCAL_IMAGE) .
+	@echo "Image built: $(LOCAL_IMAGE)"
+
+k8s-up: k8s-build ## Deploy toàn bộ stack lên Docker Desktop K8s
+	@echo "==> Applying namespace & RBAC..."
+	kubectl apply -f $(K8S_LOCAL_DIR)/namespace.yaml
+	kubectl apply -f $(K8S_LOCAL_DIR)/serviceaccount.yaml
+	@echo "==> Applying config & secrets..."
+	kubectl apply -f $(K8S_LOCAL_DIR)/secrets.yaml
+	kubectl apply -f $(K8S_LOCAL_DIR)/configmap.yaml
+	@echo "==> Deploying dependencies (postgres, redis, openbao)..."
+	kubectl apply -f $(K8S_LOCAL_DIR)/postgres.yaml
+	kubectl apply -f $(K8S_LOCAL_DIR)/redis.yaml
+	kubectl apply -f $(K8S_LOCAL_DIR)/openbao.yaml
+	@echo "==> Waiting for dependencies to be ready..."
+	kubectl -n tnt-engine rollout status deployment/postgres  --timeout=120s
+	kubectl -n tnt-engine rollout status deployment/redis     --timeout=60s
+	kubectl -n tnt-engine rollout status deployment/openbao   --timeout=60s
+	@echo "==> Initializing OpenBao transit keys..."
+	$(MAKE) k8s-init
+	@echo "==> Deploying tnt-engine..."
+	kubectl apply -f $(K8S_LOCAL_DIR)/deployment.yaml
+	kubectl apply -f $(K8S_LOCAL_DIR)/service.yaml
+	kubectl -n tnt-engine rollout status deployment/tnt-engine --timeout=180s
+	@echo ""
+	@echo "Stack is ready!"
+	@echo "  App:     http://localhost:8000"
+	@echo "  Docs:    http://localhost:8000/docs"
+	@echo "  Health:  http://localhost:8000/api/v1/health"
+
+k8s-init: ## Khởi tạo OpenBao transit keys trong K8s (port-forward tạm thời)
+	@echo "==> Waiting for OpenBao pod..."
+	kubectl -n tnt-engine wait --for=condition=ready pod -l app=openbao --timeout=60s
+	@echo "==> Starting port-forward localhost:18200 -> openbao:8200..."
+	kubectl -n tnt-engine port-forward svc/openbao 18200:8200 & echo $$! > /tmp/tnt-pf-openbao.pid
+	@sleep 3
+	VAULT_ADDR=http://localhost:18200 bash scripts/init-openbao-dev.sh
+	@kill $$(cat /tmp/tnt-pf-openbao.pid) 2>/dev/null || true; rm -f /tmp/tnt-pf-openbao.pid
+	@echo "==> OpenBao initialized."
+
+k8s-migrate: ## Chạy database migration trong K8s
+	@echo "==> Waiting for postgres pod..."
+	kubectl -n tnt-engine wait --for=condition=ready pod -l app=postgres --timeout=60s
+	@echo "==> Applying schema..."
+	kubectl -n tnt-engine exec -i deploy/postgres -- psql -U tnt tnt_engine < sql/schema.sql
+	@echo "==> Migration complete."
+
+k8s-down: ## Xóa toàn bộ K8s resources (namespace + tất cả resources bên trong)
+	kubectl delete namespace tnt-engine --ignore-not-found
+	@echo "Namespace tnt-engine deleted."
+
+k8s-status: ## Xem trạng thái pods, services, deployments
+	@echo "=== Pods ==="
+	kubectl -n tnt-engine get pods -o wide
+	@echo ""
+	@echo "=== Services ==="
+	kubectl -n tnt-engine get svc
+	@echo ""
+	@echo "=== Deployments ==="
+	kubectl -n tnt-engine get deploy
+
+k8s-logs: ## Xem logs của tnt-engine (follow)
+	kubectl -n tnt-engine logs -l app=tnt-engine -f --tail=100
+
+k8s-logs-all: ## Xem logs tất cả services (postgres, redis, openbao, tnt-engine)
+	@echo "==> [postgres]" && kubectl -n tnt-engine logs -l app=postgres --tail=20 || true
+	@echo "==> [redis]"    && kubectl -n tnt-engine logs -l app=redis    --tail=20 || true
+	@echo "==> [openbao]"  && kubectl -n tnt-engine logs -l app=openbao  --tail=20 || true
+	@echo "==> [tnt-engine]" && kubectl -n tnt-engine logs -l app=tnt-engine --tail=50 || true
+
+k8s-port-forward: ## Forward port 8000 → localhost:8000 (chỉ cần khi service không phải LoadBalancer)
+	@echo "Forwarding http://localhost:8000 -> tnt-engine:8000  (Ctrl+C để dừng)"
+	kubectl -n tnt-engine port-forward svc/tnt-engine 8000:8000
+
+k8s-restart: ## Restart tnt-engine deployment (reload code sau khi rebuild image)
+	kubectl -n tnt-engine rollout restart deployment/tnt-engine
+	kubectl -n tnt-engine rollout status deployment/tnt-engine --timeout=120s
+
+k8s-shell: ## Mở shell bên trong pod tnt-engine
+	kubectl -n tnt-engine exec -it \
+		$$(kubectl -n tnt-engine get pod -l app=tnt-engine -o jsonpath='{.items[0].metadata.name}') \
+		-- /bin/sh
+
+k8s-helm-local: k8s-build ## Deploy qua Helm với values-local.yaml (hybrid mode)
+	helm upgrade --install tnt-engine ./helm/tnt-engine \
+		--namespace tnt-engine --create-namespace \
+		--values ./helm/values-local.yaml \
+		--set image.tag=local \
+		--wait --atomic --timeout 180s
