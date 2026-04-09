@@ -38,11 +38,11 @@ services:
       - "8200:8200"
     command: server -dev
     healthcheck:
-      test: ["CMD", "bao", "status"]
-      interval: 10s
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:8200/v1/sys/health || exit 1"]
+      interval: 5s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 15
+      start_period: 5s
 
   # T&T Engine — the Python app itself
   tnt-engine:
