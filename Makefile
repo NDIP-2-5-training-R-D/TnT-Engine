@@ -15,6 +15,10 @@ dev: ## Start full local dev (postgres + redis + openbao + tnt-engine app)
 	docker compose up -d --build
 	bash scripts/init-openbao-dev.sh
 
+dev-kafka: ## Start local dev stack WITH Kafka audit (TNT_AUDIT_BACKEND=kafka)
+	TNT_AUDIT_BACKEND=kafka docker compose --profile kafka up -d --build
+	bash scripts/init-openbao-dev.sh
+
 dev-down: ## Stop local dev environment
 	docker compose down
 
@@ -71,7 +75,11 @@ push: ## Push Docker image to registry
 
 # ── Helm deploy ──────────────────────────────────────────────────────
 
-deploy: ## Helm deploy (ENV=dev|staging|prod)
+kafka-deploy: ## Deploy single-node Kafka to K8s namespace (dev/local)
+	kubectl apply -f k8s/kafka.yaml -n $(NAMESPACE)
+	kubectl -n $(NAMESPACE) rollout status statefulset/kafka --timeout=120s
+
+deploy: ## Helm deploy (ENV=dev|staging|prod|local)
 	helm upgrade --install $(RELEASE) ./helm/tnt-engine \
 		--namespace $(NAMESPACE) --create-namespace \
 		--values ./helm/values-$(ENV).yaml \

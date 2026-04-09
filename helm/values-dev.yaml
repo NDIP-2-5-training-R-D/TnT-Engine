@@ -37,3 +37,8 @@ config:
   TNT_ENVIRONMENT: "development"
   TNT_L1_MAX_SIZE: "1000"
   TNT_WORKER_CLEANUP_INTERVAL_SECONDS: "120"
+  # Kafka audit — enabled for dev cluster
+  TNT_AUDIT_BACKEND: "kafka"
+  TNT_KAFKA_BROKERS: "kafka.tnt-engine-dev.svc.cluster.local:9092"
+  TNT_KAFKA_TOPIC_AUDIT: "tnt-audit-events"
+  TNT_KAFKA_CONSUMER_GROUP: "tnt-audit-pg-writer"
