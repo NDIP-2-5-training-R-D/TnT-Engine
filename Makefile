@@ -155,11 +155,27 @@ loadtest: ## Run load test (TYPE=baseline|load|spike|soak)
 K8S_LOCAL_DIR = k8s/local
 LOCAL_IMAGE   = tnt-engine:local
 
+k8s-check: ## Kiểm tra Kubernetes Docker Desktop đang chạy
+	@echo "==> Checking Kubernetes connectivity..."
+	@kubectl cluster-info --request-timeout=5s > /dev/null 2>&1 || \
+		(echo ""; \
+		 echo "ERROR: Không kết nối được tới Kubernetes API server."; \
+		 echo ""; \
+		 echo "Hướng dẫn bật Kubernetes trong Docker Desktop:"; \
+		 echo "  1. Mở Docker Desktop"; \
+		 echo "  2. Settings (gear icon) → Kubernetes"; \
+		 echo "  3. Tick 'Enable Kubernetes' → Apply & Restart"; \
+		 echo "  4. Chờ indicator 'Kubernetes running' màu xanh (~2-3 phút)"; \
+		 echo "  5. Kiểm tra: kubectl config use-context docker-desktop"; \
+		 echo ""; \
+		 exit 1)
+	@echo "    Kubernetes is running: $$(kubectl config current-context)"
+
 k8s-build: ## Build Docker image cho local K8s (tag: tnt-engine:local)
 	docker build -t $(LOCAL_IMAGE) .
 	@echo "Image built: $(LOCAL_IMAGE)"
 
-k8s-up: k8s-build ## Deploy toàn bộ stack lên Docker Desktop K8s
+k8s-up: k8s-check k8s-build ## Deploy toàn bộ stack lên Docker Desktop K8s
 	@echo "==> Applying namespace & RBAC..."
 	kubectl apply -f $(K8S_LOCAL_DIR)/namespace.yaml
 	kubectl apply -f $(K8S_LOCAL_DIR)/serviceaccount.yaml

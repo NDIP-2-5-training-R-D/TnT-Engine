@@ -283,11 +283,43 @@ make template ENV=dev      # Render templates (dry-run)
 
 ## Troubleshooting
 
-### Kubernetes không khởi động được
+### Lỗi `connection reset by peer` khi chạy `make k8s-up`
+
+```
+error: failed to download openapi: Get "https://kubernetes.docker.internal:6443/...":
+read: connection reset by peer
+```
+
+**Nguyên nhân:** Kubernetes trong Docker Desktop chưa được bật hoặc chưa khởi động xong.
+
+**Cách khắc phục:**
+
+1. Mở **Docker Desktop** → **Settings** (icon bánh răng)
+2. Chọn tab **Kubernetes**
+3. Tick **"Enable Kubernetes"** → bấm **"Apply & Restart"**
+4. Chờ indicator **"Kubernetes running"** chuyển màu xanh (~2-3 phút)
+5. Chuyển sang context đúng:
+   ```bash
+   kubectl config use-context docker-desktop
+   ```
+6. Kiểm tra kết nối:
+   ```bash
+   make k8s-check
+   kubectl get nodes
+   ```
+7. Chạy lại:
+   ```bash
+   make k8s-up
+   ```
+
+### Kubernetes không khởi động được (lỗi khác)
 
 ```bash
 # Kiểm tra context
 kubectl config current-context  # phải là docker-desktop
+
+# Liệt kê tất cả context
+kubectl config get-contexts
 
 # Kiểm tra nodes
 kubectl get nodes
