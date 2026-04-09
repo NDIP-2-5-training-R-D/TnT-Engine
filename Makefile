@@ -172,7 +172,14 @@ k8s-check: ## Kiểm tra Kubernetes Docker Desktop đang chạy
 	@echo "    Kubernetes is running: $$(kubectl config current-context)"
 
 k8s-build: ## Build Docker image cho local K8s (tag: tnt-engine:local)
-	docker build -t $(LOCAL_IMAGE) .
+	@# Trên WSL2+Docker Desktop, phải build vào context desktop-linux (daemon mà K8s dùng)
+	@if docker context inspect desktop-linux > /dev/null 2>&1; then \
+		echo "==> Building with desktop-linux context (Docker Desktop daemon)..."; \
+		docker --context desktop-linux build -t $(LOCAL_IMAGE) .; \
+	else \
+		echo "==> Building with default context..."; \
+		docker build -t $(LOCAL_IMAGE) .; \
+	fi
 	@echo "Image built: $(LOCAL_IMAGE)"
 
 k8s-up: k8s-check k8s-build ## Deploy toàn bộ stack lên Docker Desktop K8s
