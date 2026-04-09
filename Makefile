@@ -205,11 +205,14 @@ k8s-up: k8s-check k8s-build ## Deploy toàn bộ stack lên Docker Desktop K8s
 k8s-init: ## Khởi tạo OpenBao transit keys trong K8s (port-forward tạm thời)
 	@echo "==> Waiting for OpenBao pod..."
 	kubectl -n tnt-engine wait --for=condition=ready pod -l app=openbao --timeout=60s
-	@echo "==> Starting port-forward localhost:18200 -> openbao:8200..."
-	kubectl -n tnt-engine port-forward svc/openbao 18200:8200 & echo $$! > /tmp/tnt-pf-openbao.pid
-	@sleep 3
-	VAULT_ADDR=http://localhost:18200 bash scripts/init-openbao-dev.sh
-	@kill $$(cat /tmp/tnt-pf-openbao.pid) 2>/dev/null || true; rm -f /tmp/tnt-pf-openbao.pid
+	@echo "==> Initializing OpenBao transit keys via port-forward..."
+	@( kubectl -n tnt-engine port-forward svc/openbao 18200:8200 & \
+	   PF_PID=$$!; \
+	   sleep 3; \
+	   VAULT_ADDR=http://localhost:18200 bash scripts/init-openbao-dev.sh; \
+	   STATUS=$$?; \
+	   kill $$PF_PID 2>/dev/null || true; \
+	   exit $$STATUS )
 	@echo "==> OpenBao initialized."
 
 k8s-migrate: ## Chạy database migration trong K8s
