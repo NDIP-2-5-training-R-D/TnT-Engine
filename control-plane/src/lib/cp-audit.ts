@@ -1,9 +1,25 @@
 /**
  * Control Plane Audit Store
  *
- * Storage modes:
- *   - file (default, dev/demo)
- *   - postgres (recommended for persistent multi-replica deployments)
+ * Storage modes (CP_AUDIT_STORE env var):
+ *   - "file"     (default, dev/demo) — JSON file, max 1000 entries, lost on pod restart
+ *   - "postgres" (recommended for persistent multi-replica deployments)
+ *   - "kafka"    (recommended for K8s) — produces to Kafka; a consumer writes to PostgreSQL.
+ *                Survives pod restarts because messages stay in Kafka until consumed.
+ *
+ * Kafka env vars:
+ *   KAFKA_BROKERS          Comma-separated broker list (e.g. "kafka:9092")
+ *   KAFKA_TOPIC_CP_AUDIT   Topic name (default: "cp-audit-events")
+ *   KAFKA_CLIENT_ID        Producer client ID (default: "tnt-control-plane")
+ *   KAFKA_SECURITY_PROTOCOL  "plaintext" | "ssl" | "sasl_plaintext" | "sasl_ssl"
+ *   KAFKA_SASL_MECHANISM   "plain" | "scram-sha-256" | "scram-sha-512"
+ *   KAFKA_SASL_USERNAME
+ *   KAFKA_SASL_PASSWORD
+ *   KAFKA_SSL_CA           Path to CA certificate (for ssl / sasl_ssl)
+ *
+ * In Kafka mode, listCpAudit() falls back to PostgreSQL (CP_AUDIT_DATABASE_URL / PG_*)
+ * so the dashboard can still display past events written by the consumer.
+ * If PostgreSQL is also unavailable, an empty list is returned.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "fs";
@@ -44,12 +60,37 @@ const MAX_ENTRIES = 1000;
 const MAX_DETAIL_LENGTH = 120;
 const PG_SSL = (process.env.PG_SSL || "false").toLowerCase() === "true";
 
+// ── Kafka config ───────────────────────────────────────────────────────
+
+const KAFKA_BROKERS = (process.env.KAFKA_BROKERS || "localhost:9092")
+  .split(",")
+  .map((b) => b.trim());
+const KAFKA_TOPIC = process.env.KAFKA_TOPIC_CP_AUDIT || "cp-audit-events";
+const KAFKA_CLIENT_ID = process.env.KAFKA_CLIENT_ID || "tnt-control-plane";
+const KAFKA_SECURITY_PROTOCOL = (
+  process.env.KAFKA_SECURITY_PROTOCOL || "plaintext"
+).toLowerCase() as "plaintext" | "ssl" | "sasl_plaintext" | "sasl_ssl";
+const KAFKA_SASL_MECHANISM = (
+  process.env.KAFKA_SASL_MECHANISM || "plain"
+).toLowerCase() as "plain" | "scram-sha-256" | "scram-sha-512";
+const KAFKA_SASL_USERNAME = process.env.KAFKA_SASL_USERNAME || "";
+const KAFKA_SASL_PASSWORD = process.env.KAFKA_SASL_PASSWORD || "";
+const KAFKA_SSL_CA = process.env.KAFKA_SSL_CA || "";
+
+// ── Global singletons ──────────────────────────────────────────────────
+
 declare global {
   // eslint-disable-next-line no-var
   var __tnt_cp_audit_pool: PgPool | undefined;
   // eslint-disable-next-line no-var
   var __tnt_cp_audit_schema_ready: Promise<void> | undefined;
+  // eslint-disable-next-line no-var
+  var __tnt_cp_kafka_producer: import("kafkajs").Producer | undefined;
+  // eslint-disable-next-line no-var
+  var __tnt_cp_kafka_producer_ready: Promise<void> | undefined;
 }
+
+// ── File helpers ───────────────────────────────────────────────────────
 
 function load(): CpAuditEntry[] {
   try {
@@ -64,6 +105,8 @@ function save(entries: CpAuditEntry[]): void {
   writeFileSync(STORE_PATH, JSON.stringify(entries, null, 2));
 }
 
+// ── Shared helpers ─────────────────────────────────────────────────────
+
 function generateId(): string {
   return `cp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -72,6 +115,8 @@ function sanitizeDetail(detail: string | undefined): string | undefined {
   if (!detail) return undefined;
   return detail.slice(0, MAX_DETAIL_LENGTH);
 }
+
+// ── PostgreSQL helpers ─────────────────────────────────────────────────
 
 function databaseUrl(): string {
   if (process.env.CP_AUDIT_DATABASE_URL) return process.env.CP_AUDIT_DATABASE_URL;
@@ -141,6 +186,65 @@ function rowToEntry(row: QueryResultRow): CpAuditEntry {
   };
 }
 
+// ── Kafka helpers ──────────────────────────────────────────────────────
+
+async function getKafkaProducer(): Promise<import("kafkajs").Producer> {
+  if (!globalThis.__tnt_cp_kafka_producer) {
+    const { Kafka } = (await import("kafkajs")) as typeof import("kafkajs");
+
+    const kafkaConfig: import("kafkajs").KafkaConfig = {
+      clientId: KAFKA_CLIENT_ID,
+      brokers: KAFKA_BROKERS,
+    };
+
+    if (KAFKA_SECURITY_PROTOCOL === "ssl" || KAFKA_SECURITY_PROTOCOL === "sasl_ssl") {
+      const fs = await import("fs");
+      kafkaConfig.ssl = KAFKA_SSL_CA
+        ? { ca: fs.readFileSync(KAFKA_SSL_CA) }
+        : true;
+    }
+
+    if (KAFKA_SECURITY_PROTOCOL === "sasl_plaintext" || KAFKA_SECURITY_PROTOCOL === "sasl_ssl") {
+      kafkaConfig.sasl = {
+        mechanism: KAFKA_SASL_MECHANISM,
+        username: KAFKA_SASL_USERNAME,
+        password: KAFKA_SASL_PASSWORD,
+      } as import("kafkajs").SASLOptions;
+    }
+
+    const kafka = new Kafka(kafkaConfig);
+    const producer = kafka.producer({
+      allowAutoTopicCreation: true,
+      // Wait for all in-sync replicas — most durable option
+      transactionTimeout: 30000,
+    });
+
+    if (!globalThis.__tnt_cp_kafka_producer_ready) {
+      globalThis.__tnt_cp_kafka_producer_ready = producer.connect();
+    }
+    await globalThis.__tnt_cp_kafka_producer_ready;
+    globalThis.__tnt_cp_kafka_producer = producer;
+  }
+
+  return globalThis.__tnt_cp_kafka_producer;
+}
+
+async function produceToKafka(record: CpAuditEntry): Promise<void> {
+  const producer = await getKafkaProducer();
+  await producer.send({
+    topic: KAFKA_TOPIC,
+    messages: [
+      {
+        key: record.performed_by,
+        value: JSON.stringify(record),
+      },
+    ],
+    acks: -1, // acks=all — wait for all in-sync replicas
+  });
+}
+
+// ── Public API ─────────────────────────────────────────────────────────
+
 export async function logCpAction(
   entry: Omit<CpAuditEntry, "id" | "performed_at">
 ): Promise<CpAuditEntry> {
@@ -151,6 +255,22 @@ export async function logCpAction(
     performed_at: new Date().toISOString(),
   };
 
+  // ── Kafka mode ───────────────────────────────────────────────────
+  if (STORE_MODE === "kafka") {
+    try {
+      await produceToKafka(record);
+    } catch (err) {
+      // Kafka unavailable — fall back to file as a local safety net
+      console.error("[cp-audit] Kafka produce failed, falling back to file:", err);
+      const entries = load();
+      entries.unshift(record);
+      if (entries.length > MAX_ENTRIES) entries.splice(MAX_ENTRIES);
+      save(entries);
+    }
+    return record;
+  }
+
+  // ── PostgreSQL mode ──────────────────────────────────────────────
   if (STORE_MODE === "postgres") {
     await ensurePgSchema();
     const pool = await getPgPool();
@@ -173,6 +293,7 @@ export async function logCpAction(
     return record;
   }
 
+  // ── File mode (default) ──────────────────────────────────────────
   const entries = load();
   entries.unshift(record);
   if (entries.length > MAX_ENTRIES) entries.splice(MAX_ENTRIES);
@@ -181,30 +302,43 @@ export async function logCpAction(
 }
 
 export async function listCpAudit(limit = 50): Promise<CpAuditEntry[]> {
-  if (STORE_MODE === "postgres") {
-    await ensurePgSchema();
-    const pool = await getPgPool();
-    const result = await pool.query(
-      `
-        SELECT id, action, performed_by, role, target, result, detail, performed_at
-        FROM cp_audit_log
-        ORDER BY performed_at DESC
-        LIMIT $1
-      `,
-      [limit]
-    );
-    return result.rows.map(rowToEntry);
+  // In Kafka mode, the consumer writes events to PostgreSQL.
+  // Use PostgreSQL for querying if available; otherwise fall back to the local file cache.
+  if (STORE_MODE === "kafka" || STORE_MODE === "postgres") {
+    try {
+      await ensurePgSchema();
+      const pool = await getPgPool();
+      const result = await pool.query(
+        `
+          SELECT id, action, performed_by, role, target, result, detail, performed_at
+          FROM cp_audit_log
+          ORDER BY performed_at DESC
+          LIMIT $1
+        `,
+        [limit]
+      );
+      return result.rows.map(rowToEntry);
+    } catch {
+      // PostgreSQL unavailable in Kafka mode — serve from local file cache
+      if (STORE_MODE === "kafka") return load().slice(0, limit);
+      throw; // In postgres-only mode, re-throw
+    }
   }
 
   return load().slice(0, limit);
 }
 
 export async function cpAuditCount(): Promise<number> {
-  if (STORE_MODE === "postgres") {
-    await ensurePgSchema();
-    const pool = await getPgPool();
-    const result = await pool.query("SELECT COUNT(*)::int AS count FROM cp_audit_log");
-    return Number(result.rows[0]?.count ?? 0);
+  if (STORE_MODE === "kafka" || STORE_MODE === "postgres") {
+    try {
+      await ensurePgSchema();
+      const pool = await getPgPool();
+      const result = await pool.query("SELECT COUNT(*)::int AS count FROM cp_audit_log");
+      return Number(result.rows[0]?.count ?? 0);
+    } catch {
+      if (STORE_MODE === "kafka") return load().length;
+      throw;
+    }
   }
 
   return load().length;

@@ -31,6 +31,7 @@ from tnt_engine.runtime.feature_flags import FeatureFlags
 from tnt_engine.security.quota import QuotaManager
 from tnt_engine.security.rate_limiter import RateLimiter
 from tnt_engine.service.audit_writer import ReliableAuditWriter
+from tnt_engine.service.kafka_audit_writer import KafkaAuditWriter
 from tnt_engine.service.policy import PolicyEngine
 from tnt_engine.service.token_service import TokenService
 from tnt_engine.workers.cache_rebuild import CacheRebuildWorker
@@ -62,8 +63,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     repo = TokenRepository(db)
 
-    # ── Reliable Audit Writer ────────────────────────────────────
-    audit_writer = ReliableAuditWriter(repo, cfg)
+    # ── Audit Writer ─────────────────────────────────────────────
+    # Select backend via TNT_AUDIT_BACKEND env var:
+    #   "postgres" (default): in-memory buffer → PostgreSQL batch writes
+    #   "kafka":              produce to Kafka → consume → PostgreSQL
+    if cfg.audit_backend == "kafka":
+        try:
+            audit_writer: ReliableAuditWriter | KafkaAuditWriter = KafkaAuditWriter(repo, cfg)
+        except ImportError:
+            logger.warning(
+                "aiokafka_not_installed_falling_back_to_postgres",
+                hint="pip install 'tnt-engine[kafka]'",
+            )
+            audit_writer = ReliableAuditWriter(repo, cfg)
+    else:
+        audit_writer = ReliableAuditWriter(repo, cfg)
     await audit_writer.start()
 
     svc = TokenService(
