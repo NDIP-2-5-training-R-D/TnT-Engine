@@ -54,6 +54,22 @@ async def _ensure_transit_keys(cfg: "Settings") -> None:
     log = _log.getLogger(__name__)
 
     async with _httpx.AsyncClient(verify=cfg.crypto_verify_ssl, timeout=10) as client:
+        # 0. Wait for OpenBao to be ready (up to 30s)
+        import asyncio as _asyncio
+        for attempt in range(15):
+            try:
+                r = await client.get(f"{base}/sys/health")
+                if r.status_code in (200, 429, 472, 473):  # any response = alive
+                    break
+            except Exception:
+                pass
+            if attempt < 14:
+                log.info("waiting_for_openbao attempt=%d", attempt + 1)
+                await _asyncio.sleep(2)
+        else:
+            log.warning("openbao_not_ready_after_30s — transit keys may not be provisioned")
+            return
+
         # 1. Enable transit engine (ignore 400 = already mounted)
         try:
             r = await client.post(f"{base}/sys/mounts/transit", headers=headers,
