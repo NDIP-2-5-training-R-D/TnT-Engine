@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSession } from "next-auth/react";
 import {
   Wand2, ArrowRight, Wifi, WifiOff, RefreshCw,
   ShieldAlert, Shield, ShieldCheck,
@@ -381,12 +382,14 @@ function RuleCard({
   rule,
   levelConfig,
   isLive,
+  canWrite,
   onEdit,
   onDelete,
 }: {
   rule: TransformRule;
   levelConfig: typeof LEVEL_CONFIG[SensitivityLevel];
   isLive: boolean;
+  canWrite: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -431,8 +434,8 @@ function RuleCard({
         )}
         <span className="text-xs text-slate-600">tweak: {rule.tweak_source}</span>
 
-        {/* Edit / Delete — only shown when engine is live */}
-        {isLive && (
+        {/* Edit / Delete — only shown when engine is live AND user can write */}
+        {isLive && canWrite && (
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity mt-1">
             <button
               onClick={onEdit}
@@ -458,6 +461,10 @@ function RuleCard({
 // ── Main Page ──────────────────────────────────────────────────────
 
 export default function TransformsPage() {
+  const { data: session } = useSession();
+  const role = (session?.user as { role?: string })?.role ?? "requester";
+  const canWrite = role === "admin" || role === "manager";
+
   const [data, setData] = useState<TransformRulesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -548,8 +555,8 @@ export default function TransformsPage() {
             </span>
           )}
 
-          {/* Add rule button — only when live */}
-          {isLive && (
+          {/* Add rule button — only when live AND user is admin/manager */}
+          {isLive && canWrite && (
             <button
               onClick={() => { setEditRule(null); setShowForm(true); }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-purple-600 hover:bg-purple-500 text-white transition-colors"
@@ -654,6 +661,7 @@ export default function TransformsPage() {
                       rule={rule}
                       levelConfig={cfg}
                       isLive={isLive}
+                      canWrite={canWrite}
                       onEdit={() => { setShowForm(false); setEditRule(rule); }}
                       onDelete={() => setDeleteRule(rule)}
                     />

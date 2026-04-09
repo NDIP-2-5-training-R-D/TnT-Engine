@@ -318,10 +318,10 @@ export async function listCpAudit(limit = 50): Promise<CpAuditEntry[]> {
         [limit]
       );
       return result.rows.map(rowToEntry);
-    } catch {
+    } catch (_e) {
       // PostgreSQL unavailable in Kafka mode — serve from local file cache
       if (STORE_MODE === "kafka") return load().slice(0, limit);
-      throw; // In postgres-only mode, re-throw
+      throw _e; // In postgres-only mode, re-throw
     }
   }
 
@@ -335,9 +335,9 @@ export async function cpAuditCount(): Promise<number> {
       const pool = await getPgPool();
       const result = await pool.query("SELECT COUNT(*)::int AS count FROM cp_audit_log");
       return Number(result.rows[0]?.count ?? 0);
-    } catch {
+    } catch (_e) {
       if (STORE_MODE === "kafka") return load().length;
-      throw;
+      throw _e;
     }
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { useTransitKeys, rotateKey, downloadBackup } from "@/lib/api";
 import type { TransitKeyInfo } from "@/lib/types";
 import { Key, RotateCw, Download, ShieldCheck, AlertTriangle, Loader2 } from "lucide-react";
@@ -59,7 +60,7 @@ function RotateConfirm({ keyName, onDone }: { keyName: string; onDone: () => voi
   );
 }
 
-function KeyCard({ k, onRefresh }: { k: TransitKeyInfo; onRefresh: () => void }) {
+function KeyCard({ k, canWrite, onRefresh }: { k: TransitKeyInfo; canWrite: boolean; onRefresh: () => void }) {
   const [showRotate, setShowRotate] = useState(false);
 
   return (
@@ -77,7 +78,7 @@ function KeyCard({ k, onRefresh }: { k: TransitKeyInfo; onRefresh: () => void })
         <div><span className="text-slate-500">Encrypt:</span> <span className={k.supports_encryption ? "text-vault-green" : "text-slate-600"}>{k.supports_encryption ? "Yes" : "No"}</span></div>
         <div><span className="text-slate-500">Deletable:</span> <span className={k.deletion_allowed ? "text-vault-red" : "text-vault-green"}>{k.deletion_allowed ? "Yes" : "No"}</span></div>
       </div>
-      {showRotate ? (
+      {canWrite && (showRotate ? (
         <RotateConfirm keyName={k.name} onDone={() => { setShowRotate(false); onRefresh(); }} />
       ) : (
         <button
@@ -86,12 +87,16 @@ function KeyCard({ k, onRefresh }: { k: TransitKeyInfo; onRefresh: () => void })
         >
           <RotateCw className="w-3.5 h-3.5" /> Rotate Key
         </button>
-      )}
+      ))}
     </div>
   );
 }
 
 export default function KeysPage() {
+  const { data: session } = useSession();
+  const role = (session?.user as { role?: string })?.role ?? "requester";
+  const canWrite = role === "admin" || role === "manager";
+
   const { data, isLoading, mutate } = useTransitKeys();
   const [backupStatus, setBackupStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
 
@@ -120,14 +125,16 @@ export default function KeysPage() {
           <ShieldCheck className="w-6 h-6 text-vault-blue" />
           <h1 className="text-xl font-bold text-white">Key Lifecycle Management</h1>
         </div>
-        <button
-          onClick={handleBackup}
-          disabled={backupStatus === "loading"}
-          className="flex items-center gap-2 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-300 hover:bg-slate-600 transition-colors disabled:opacity-50"
-        >
-          {backupStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-          {backupStatus === "done" ? "Downloaded!" : backupStatus === "error" ? "Failed" : "Raft Backup"}
-        </button>
+        {canWrite && (
+          <button
+            onClick={handleBackup}
+            disabled={backupStatus === "loading"}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm text-slate-300 hover:bg-slate-600 transition-colors disabled:opacity-50"
+          >
+            {backupStatus === "loading" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {backupStatus === "done" ? "Downloaded!" : backupStatus === "error" ? "Failed" : "Raft Backup"}
+          </button>
+        )}
       </div>
 
       {isLoading ? (
@@ -141,7 +148,7 @@ export default function KeysPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {data.map((k) => <KeyCard key={k.name} k={k} onRefresh={() => mutate()} />)}
+          {data.map((k) => <KeyCard key={k.name} k={k} canWrite={canWrite} onRefresh={() => mutate()} />)}
         </div>
       )}
     </div>

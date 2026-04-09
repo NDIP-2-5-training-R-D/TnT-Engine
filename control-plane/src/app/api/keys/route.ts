@@ -3,12 +3,15 @@
 
 export const dynamic = "force-dynamic";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { requireAuth } from "@/lib/rbac";
 
 const VAULT_ADDR = process.env.VAULT_ADDR || "http://localhost:8200";
 const VAULT_TOKEN = process.env.VAULT_TOKEN || "";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth.error) return auth.error;
   try {
     // List all transit keys
     const listRes = await fetch(`${VAULT_ADDR}/v1/transit/keys?list=true`, {
