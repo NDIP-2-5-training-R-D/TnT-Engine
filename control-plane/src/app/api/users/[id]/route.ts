@@ -60,7 +60,7 @@ export async function PUT(
   }
 
   // Validate role if provided
-  const validRoles: Role[] = ["admin", "operator", "viewer"];
+  const validRoles: Role[] = ["admin", "manager", "requester"];
   if (body.role && !validRoles.includes(body.role as Role)) {
     return NextResponse.json(
       { error: `role must be one of: ${validRoles.join(", ")}` },

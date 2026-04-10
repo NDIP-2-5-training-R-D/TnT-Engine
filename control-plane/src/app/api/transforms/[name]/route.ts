@@ -1,17 +1,22 @@
 // BFF: Single transform rule — PUT (update) and DELETE (soft-delete).
 // Proxies to T&T Engine /admin/rules/{name}.
+// Both operations require admin or manager role.
 
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
+import { requireRole } from "@/lib/rbac";
 
 const TNT_URL = process.env.TNT_ENGINE_URL || "http://localhost:8000";
 
 type RouteContext = { params: Promise<{ name: string }> };
 
-// ── PUT /api/transforms/[name] — update a rule ────────────────────────
+// ── PUT /api/transforms/[name] — update a rule (admin / manager only) ─
 
 export async function PUT(req: NextRequest, ctx: RouteContext) {
+  const auth = await requireRole(req, ["admin", "manager"]);
+  if (auth.error) return auth.error;
+
   const { name } = await ctx.params;
 
   let body: unknown;
@@ -38,9 +43,12 @@ export async function PUT(req: NextRequest, ctx: RouteContext) {
   }
 }
 
-// ── DELETE /api/transforms/[name] — soft-delete a rule ───────────────
+// ── DELETE /api/transforms/[name] — soft-delete (admin / manager only)
 
-export async function DELETE(_req: NextRequest, ctx: RouteContext) {
+export async function DELETE(req: NextRequest, ctx: RouteContext) {
+  const auth = await requireRole(req, ["admin", "manager"]);
+  if (auth.error) return auth.error;
+
   const { name } = await ctx.params;
 
   try {

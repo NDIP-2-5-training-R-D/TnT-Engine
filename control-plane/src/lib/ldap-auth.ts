@@ -11,7 +11,7 @@
  *   LDAP_USERNAME_ATTR  Attribute that holds the username (default: sAMAccountName for AD, uid for OpenLDAP)
  *   LDAP_ROLE_ATTR    Attribute that holds the role (default: description)
  *   LDAP_ADMIN_GROUP  Group CN for admins    (e.g. CNTnt-Admins)
- *   LDAP_OPERATOR_GROUP  Group CN for operators
+ *   LDAP_MANAGER_GROUP   Group CN for managers
  *
  * Requires the `ldapts` package. Install: npm install ldapts
  * If ldapts is not available, throws a clear error.
@@ -36,16 +36,16 @@ function getLdapConfig() {
     usernameAttr: process.env.LDAP_USERNAME_ATTR ?? "uid",
     roleAttr: process.env.LDAP_ROLE_ATTR ?? "description",
     adminGroup: process.env.LDAP_ADMIN_GROUP ?? "tnt-admins",
-    operatorGroup: process.env.LDAP_OPERATOR_GROUP ?? "tnt-operators",
+    managerGroup: process.env.LDAP_MANAGER_GROUP ?? "tnt-managers",
   };
 }
 
 function resolveRoleFromGroups(memberOf: string[] | undefined, cfg: ReturnType<typeof getLdapConfig>): Role {
-  if (!memberOf || memberOf.length === 0) return "viewer";
+  if (!memberOf || memberOf.length === 0) return "requester";
   const groups = memberOf.map((g) => g.toLowerCase());
   if (groups.some((g) => g.includes(cfg.adminGroup.toLowerCase()))) return "admin";
-  if (groups.some((g) => g.includes(cfg.operatorGroup.toLowerCase()))) return "operator";
-  return "viewer";
+  if (groups.some((g) => g.includes(cfg.managerGroup.toLowerCase()))) return "manager";
+  return "requester";
 }
 
 export async function authenticateLdap(username: string, password: string): Promise<LdapUser | null> {

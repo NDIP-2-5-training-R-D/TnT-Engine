@@ -15,7 +15,7 @@
  *   - Content-Disposition: attachment; filename="compliance-report-*.csv|json"
  *   - Body: CSV or JSON compliance report
  *
- * RBAC: admin and operator only.
+ * RBAC: admin and manager only.
  */
 
 export const dynamic = "force-dynamic";
@@ -132,7 +132,7 @@ function toCsv(entries: AuditEntry[], summary: ComplianceSummary): string {
 // ── Route handler ──────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const authResult = await requireRole(request, ["admin", "operator"]);
+  const authResult = await requireRole(request, ["admin", "manager"]);
   if (authResult.error) return authResult.error;
 
   let body: Record<string, unknown>;

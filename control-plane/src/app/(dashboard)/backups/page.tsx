@@ -740,9 +740,9 @@ export default function BackupsPage() {
   const [loading, setLoading]   = useState(true);
   const [tab, setTab]           = useState<Tab>("history");
 
-  const role     = (session?.user as { role?: string })?.role ?? "viewer";
+  const role     = (session?.user as { role?: string })?.role ?? "requester";
   const isAdmin  = role === "admin";
-  const canWrite = isAdmin || role === "operator";
+  const canWrite = isAdmin || role === "manager";
 
   const fetchData = useCallback(async () => {
     try {

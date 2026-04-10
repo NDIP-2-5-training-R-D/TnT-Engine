@@ -2,37 +2,47 @@
  * Maker-Checker Approval Queue — in-memory store with file persistence.
  *
  * Workflow:
- *   1. User A requests a sensitive action (seal, rotate, delete) → status: "pending"
- *   2. User B (different user, admin role) reviews and approves/rejects
- *   3. If approved, the system executes the action against OpenBao
+ *   1. User A requests a sensitive action (seal, rotate, delete, role assignment) → status: "pending"
+ *   2. User B (different user, admin or manager role) reviews and approves/rejects
+ *   3. If approved, the system executes the action against OpenBao (or creates user for ROLE_ASSIGNMENT)
  *   4. If rejected, the request is archived with reason
  *
  * Constraints:
  *   - Requester CANNOT approve their own request (enforced)
- *   - Only "admin" role can approve/reject
+ *   - Only "admin" or "manager" role can approve/reject
  *   - Pending requests expire after 1 hour
- *   - Actions requiring approval: SEAL, KEY_ROTATE, KEY_DELETE, POLICY_DELETE
+ *   - Actions requiring approval: SEAL, KEY_ROTATE, KEY_DELETE, POLICY_DELETE, ROLE_ASSIGNMENT
+ *   - requester role: can only create ROLE_ASSIGNMENT requests, cannot approve any request
  */
 
 import { readFileSync, writeFileSync, existsSync } from "fs";
 
 export type ApprovalStatus = "pending" | "approved" | "rejected" | "executed" | "expired";
-export type ApprovalAction = "SEAL" | "KEY_ROTATE" | "KEY_DELETE" | "POLICY_DELETE";
+export type ApprovalAction =
+  | "SEAL"
+  | "KEY_ROTATE"
+  | "KEY_DELETE"
+  | "POLICY_DELETE"
+  | "ROLE_ASSIGNMENT"
+  | "RULE_CREATE"
+  | "RULE_UPDATE"
+  | "RULE_DELETE";
 
 export interface ApprovalRequest {
   id: string;
   action: ApprovalAction;
-  target: string;           // key name, policy name, or "vault"
-  requested_by: string;     // username
+  target: string;                          // key name, rule name, policy name, or "vault"
+  requested_by: string;                    // username
   requested_by_role: string;
   reason: string;
+  payload?: Record<string, unknown>;       // rule data for RULE_CREATE / RULE_UPDATE
   status: ApprovalStatus;
   reviewed_by?: string;
   review_reason?: string;
   created_at: string;
   reviewed_at?: string;
   executed_at?: string;
-  expires_at: string;       // 1 hour from creation
+  expires_at: string;                      // 1 hour from creation
 }
 
 const STORE_PATH = process.env.APPROVAL_STORE_PATH || "/tmp/tnt-approvals.json";
@@ -65,7 +75,8 @@ export function createApproval(
   target: string,
   requestedBy: string,
   requestedByRole: string,
-  reason: string
+  reason: string,
+  payload?: Record<string, unknown>
 ): ApprovalRequest {
   const now = new Date();
   const request: ApprovalRequest = {
@@ -75,6 +86,7 @@ export function createApproval(
     requested_by: requestedBy,
     requested_by_role: requestedByRole,
     reason,
+    ...(payload ? { payload } : {}),
     status: "pending",
     created_at: now.toISOString(),
     expires_at: new Date(now.getTime() + EXPIRY_MS).toISOString(),

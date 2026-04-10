@@ -1,11 +1,12 @@
 // BFF: Transform Rules — fetched live from T&T Engine admin API.
 // Falls back to seeded CANONICAL_RULES when the engine is unreachable.
-// GET  — list all active rules
-// POST — create a new rule (proxied to engine /admin/rules)
+// GET  — list all active rules (all authenticated roles)
+// POST — create a new rule (admin / manager only)
 
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, requireRole } from "@/lib/rbac";
 import type { TransformRule } from "@/lib/types";
 
 const TNT_URL = (process.env.TNT_ENGINE_URL || "http://localhost:8000").replace(/\/$/, "");
@@ -32,7 +33,9 @@ const CANONICAL_RULES: TransformRule[] = [
 
 // ── GET /api/transforms ───────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth.error) return auth.error;
   // 1. Confirm engine is reachable via health endpoint
   let engineAlive = false;
   try {
@@ -87,9 +90,12 @@ export async function GET() {
   });
 }
 
-// ── POST /api/transforms — create a new rule ──────────────────────────
+// ── POST /api/transforms — create a new rule (admin / manager only) ──
 
 export async function POST(req: NextRequest) {
+  const auth = await requireRole(req, ["admin", "manager"]);
+  if (auth.error) return auth.error;
+
   let body: unknown;
   try {
     body = await req.json();

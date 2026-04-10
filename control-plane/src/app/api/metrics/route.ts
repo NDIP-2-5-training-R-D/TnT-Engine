@@ -16,9 +16,9 @@ import { NextResponse } from "next/server";
 
 const TNT_URL = process.env.TNT_ENGINE_URL || "http://localhost:8000";
 
-// ── SLO constants (mirror metrics.py) ─────────────────────────────
-const SLO_LATENCY_P99_MS  = 200;
-const SLO_CACHE_HIT_PCT   = 80;
+// ── SLO thresholds — override via env vars per environment ─────────
+const SLO_LATENCY_P99_MS = parseInt(process.env.SLO_LATENCY_P99_MS ?? "200", 10);
+const SLO_CACHE_HIT_PCT  = parseInt(process.env.SLO_CACHE_HIT_PCT  ?? "80",  10);
 
 // ── Time-series ring buffer ────────────────────────────────────────
 // Module-level — persists across requests in the same server process.

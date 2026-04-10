@@ -4,6 +4,11 @@
  * Extends the static built-in users from src/lib/users.ts.
  * On first load, seeds the file with the 3 built-in users (hashes only, no plaintext).
  *
+ * Roles:
+ *   - admin:     full system access
+ *   - manager:   full access within namespace, can approve requests
+ *   - requester: read-only + generate secrets, must request role assignments via approval
+ *
  * Constraints:
  *   - Cannot delete the last admin
  *   - IDs are prefixed "usr_"
@@ -44,11 +49,11 @@ const SEED_USERS: ManagedUser[] = [
     force_password_change: false,
   },
   {
-    id: "usr_operator_001",
-    username: "operator",
+    id: "usr_manager_001",
+    username: "manager",
     passwordHash: "$2a$10$LN1E8kP0H7hW8QjV4NM5HeZxR0qKpO9L2z5E9X1s3sF4K7tDq8nWi",
-    role: "operator",
-    displayName: "Platform Operator",
+    role: "manager",
+    displayName: "Namespace Manager",
     status: "active",
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",
@@ -56,11 +61,11 @@ const SEED_USERS: ManagedUser[] = [
     force_password_change: false,
   },
   {
-    id: "usr_viewer_001",
-    username: "viewer",
+    id: "usr_requester_001",
+    username: "requester",
     passwordHash: "$2a$10$9fZ0rLJK1hqW5Q8X3vT7aegHN0xJ2sV4F6pB0m7cR1kE8n5Y3wUdS",
-    role: "viewer",
-    displayName: "Audit Viewer",
+    role: "requester",
+    displayName: "Service Requester",
     status: "active",
     created_at: "2024-01-01T00:00:00.000Z",
     updated_at: "2024-01-01T00:00:00.000Z",

@@ -64,9 +64,9 @@ function buildProviders(): any[] {
         profile(profile: Record<string, unknown>) {
           // Map OIDC groups claim to T&T role
           const groups: string[] = (profile.groups as string[]) ?? [];
-          let role: Role = "viewer";
+          let role: Role = "requester";
           if (groups.some((g) => /admin/i.test(g))) role = "admin";
-          else if (groups.some((g) => /operator/i.test(g))) role = "operator";
+          else if (groups.some((g) => /manager/i.test(g))) role = "manager";
 
           return {
             id: profile.sub as string,

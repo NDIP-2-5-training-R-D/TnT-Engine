@@ -1,6 +1,6 @@
 // BFF: Token revoke — marks token REVOKED (reversible, token remains in DB).
 // POST { token, tenant_id }
-// RBAC: admin or operator
+// RBAC: admin or manager
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ import { requireRole } from "@/lib/rbac";
 const TNT_URL = process.env.TNT_ENGINE_URL || "http://localhost:8000";
 
 export async function POST(request: NextRequest) {
-  const auth = await requireRole(request, ["admin", "operator"]);
+  const auth = await requireRole(request, ["admin", "manager"]);
   if (auth.error) return auth.error;
 
   let body: unknown;

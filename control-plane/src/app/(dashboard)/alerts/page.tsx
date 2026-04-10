@@ -343,9 +343,9 @@ export default function AlertsPage() {
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
 
-  const role     = (session?.user as { role?: string })?.role ?? "viewer";
+  const role     = (session?.user as { role?: string })?.role ?? "requester";
   const isAdmin  = role === "admin";
-  const canEdit  = isAdmin || role === "operator";
+  const canEdit  = isAdmin || role === "manager";
 
   const fetchData = useCallback(async () => {
     try {
@@ -456,7 +456,7 @@ export default function AlertsPage() {
       {!canEdit && (
         <div className="flex items-center gap-2 mb-4 px-4 py-3 rounded-xl border border-slate-700 bg-slate-800/30 text-slate-400 text-xs">
           <ShieldAlert className="w-4 h-4 text-slate-500 shrink-0" />
-          Viewer role — thresholds are read-only. Contact an admin or operator to make changes.
+          requester role — thresholds are read-only. Contact an admin or manager to make changes.
         </div>
       )}
 

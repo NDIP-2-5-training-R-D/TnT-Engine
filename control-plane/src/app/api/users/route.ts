@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const validRoles: Role[] = ["admin", "operator", "viewer"];
+  const validRoles: Role[] = ["admin", "manager", "requester"];
   if (!validRoles.includes(role as Role)) {
     return NextResponse.json(
       { error: `role must be one of: ${validRoles.join(", ")}` },

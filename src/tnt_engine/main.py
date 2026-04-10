@@ -37,6 +37,92 @@ from tnt_engine.workers.cache_rebuild import CacheRebuildWorker
 from tnt_engine.workers.cleanup import CleanupWorker
 
 
+import logging as _log
+
+async def _ensure_transit_keys(cfg: "Settings") -> None:
+    """Auto-provision OpenBao transit engine and keys if not already present.
+
+    Idempotent — safe to call on every startup. Failures are logged and
+    swallowed so a missing key causes a clear crypto error per-request
+    rather than preventing the service from starting.
+    """
+    import httpx as _httpx
+
+    base = cfg.crypto_base_url.rstrip("/")
+    token = cfg.crypto_token
+    headers = {"X-Vault-Token": token, "Content-Type": "application/json"}
+    log = _log.getLogger(__name__)
+
+    async with _httpx.AsyncClient(verify=cfg.crypto_verify_ssl, timeout=10) as client:
+        # 0. Wait for OpenBao to be ready (up to 30s)
+        import asyncio as _asyncio
+        for attempt in range(15):
+            try:
+                r = await client.get(f"{base}/sys/health")
+                if r.status_code in (200, 429, 472, 473):  # any response = alive
+                    break
+            except Exception:
+                pass
+            if attempt < 14:
+                log.info("waiting_for_openbao attempt=%d", attempt + 1)
+                await _asyncio.sleep(2)
+        else:
+            log.warning("openbao_not_ready_after_30s — transit keys may not be provisioned")
+            return
+
+        # 1. Enable transit engine (ignore 400 = already mounted)
+        try:
+            r = await client.post(f"{base}/sys/mounts/transit", headers=headers,
+                                  json={"type": "transit"})
+            if r.status_code not in (200, 204, 400):
+                log.warning("vault_mount_transit_failed status=%s", r.status_code)
+        except Exception as exc:
+            log.warning("vault_mount_transit_error: %s", exc)
+
+        # 2. Enable KV v2 (ignore 400 = already mounted)
+        try:
+            r = await client.post(f"{base}/sys/mounts/secret", headers=headers,
+                                  json={"type": "kv", "options": {"version": "2"}})
+            if r.status_code not in (200, 204, 400):
+                log.warning("vault_mount_kv_failed status=%s", r.status_code)
+        except Exception as exc:
+            log.warning("vault_mount_kv_error: %s", exc)
+
+        # 3. Create transit keys (200/204 = created, 400 = already exists)
+        key_specs = [
+            (cfg.crypto_transit_key, {}),
+            (cfg.crypto_hmac_key,    {"type": "hmac"}),
+            (cfg.crypto_aes_gcm_key, {"type": "aes256-gcm96"}),
+            (cfg.crypto_fpe_key,     {"type": "aes256-gcm96"}),
+        ]
+        for key_name, body in key_specs:
+            try:
+                r = await client.post(f"{base}/transit/keys/{key_name}", headers=headers,
+                                      json=body)
+                if r.status_code not in (200, 204, 400):
+                    log.warning("vault_create_key_failed key=%s status=%s", key_name, r.status_code)
+                else:
+                    log.info("vault_transit_key_ready key=%s", key_name)
+            except Exception as exc:
+                log.warning("vault_create_key_error key=%s: %s", key_name, exc)
+
+        # 4. Bootstrap FPE DEK if not present
+        try:
+            r = await client.get(f"{base}/secret/data/tnt/fpe-dek", headers=headers)
+            if r.status_code == 404:
+                import base64 as _b64, os as _os
+                raw = _b64.b64encode(_os.urandom(32)).decode()
+                enc = await client.post(f"{base}/transit/encrypt/{cfg.crypto_fpe_key}",
+                                        headers=headers, json={"plaintext": raw})
+                if enc.status_code == 200:
+                    wrapped = enc.json()["data"]["ciphertext"]
+                    await client.post(f"{base}/secret/data/tnt/fpe-dek", headers=headers,
+                                      json={"data": {"wrapped_dek": wrapped}})
+                    log.info("vault_fpe_dek_bootstrapped")
+        except Exception as exc:
+            log.warning("vault_fpe_dek_bootstrap_error: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
@@ -53,6 +139,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Expose token manager for admin status (if OpenBao backend with managed tokens)
     _token_manager = getattr(raw_backend, "_token_manager", None)
 
+    # ── Auto-initialize OpenBao transit keys (idempotent) ────────
+    if cfg.crypto_backend.lower() == "openbao":
+        await _ensure_transit_keys(cfg)
+
     cb_backend = CircuitBreakerBackend(
         raw_backend,
         failure_threshold=cfg.cb_failure_threshold,
@@ -62,7 +152,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     repo = TokenRepository(db)
 
-    # ── Reliable Audit Writer ────────────────────────────────────
+    # ── Audit Writer ─────────────────────────────────────────────
+    # In-memory buffer → PostgreSQL batch writes
     audit_writer = ReliableAuditWriter(repo, cfg)
     await audit_writer.start()
 
@@ -157,12 +248,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(cfg: Settings | None = None) -> FastAPI:
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+    from tnt_engine.errors import (
+        CryptoServiceUnavailableError,
+        EncryptionError,
+        TNTError,
+    )
+
     app = FastAPI(
         title="T&T Engine",
         description="Enterprise PII Tokenization & Data Governance Platform",
         version="0.6.0",
         lifespan=lifespan,
     )
+
+    # ── Global exception handlers ────────────────────────────────────
+    # Ensure crypto failures always return JSON (not Starlette plain-text 500).
+
+    @app.exception_handler(CryptoServiceUnavailableError)
+    async def _crypto_unavailable(request: Request, exc: CryptoServiceUnavailableError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": exc.message, "code": exc.code},
+        )
+
+    @app.exception_handler(EncryptionError)
+    async def _encryption_error(request: Request, exc: EncryptionError) -> JSONResponse:
+        return JSONResponse(
+            status_code=503,
+            content={"detail": exc.message, "code": exc.code, "cause": exc.details.get("cause", "")},
+        )
+
+    @app.exception_handler(TNTError)
+    async def _tnt_error(request: Request, exc: TNTError) -> JSONResponse:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": exc.message, "code": exc.code},
+        )
 
     # Middleware stack (applied in reverse order — last added runs first)
     # 1. Metrics (outermost — always runs)

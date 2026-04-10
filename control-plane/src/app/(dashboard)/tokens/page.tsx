@@ -131,9 +131,9 @@ function ConfirmModal({
 
 export default function TokensPage() {
   const { data: session } = useSession();
-  const role     = (session?.user as { role?: string })?.role ?? "viewer";
+  const role     = (session?.user as { role?: string })?.role ?? "requester";
   const isAdmin  = role === "admin";
-  const canWrite = isAdmin || role === "operator";
+  const canWrite = isAdmin || role === "manager";
 
   // Data state
   const [data, setData]     = useState<TokensResponse | null>(null);
