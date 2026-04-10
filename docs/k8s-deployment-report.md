@@ -18,7 +18,7 @@
 
 ---
 
-## Bước chung 1: Cài đặt RKE2 trên VM1
+## Bước chung 1: Cài đặt RKE2 trên VM1 *(chỉ VM1)*
 
 ### Cài RKE2
 
@@ -75,7 +75,7 @@ kubectl get nodes
 
 ---
 
-## Bước chung 2: Deploy Kong Gateway
+## Bước chung 2: Deploy Kong Gateway *(chỉ VM1)*
 
 ```bash
 helm repo add kong https://charts.konghq.com && helm repo update
@@ -404,12 +404,19 @@ curl http://tnt-engine.internal:30911/api/v1/health
 
 ### Tắt
 
+Chỉ cần chạy trên **VM1**:
+
 ```bash
-kubectl -n tnt-engine scale deployment tnt-engine --replicas=0
 sudo systemctl stop rke2-server
 ```
 
-### Bật lại (VM1)
+Lệnh này dừng toàn bộ Kubernetes — tất cả pods (TnT Engine, PostgreSQL, Redis, OpenBao, Kong) đều tắt theo. VM2 không cần làm gì — agent sẽ tự idle khi mất control plane.
+
+> Chỉ stop `rke2-agent` trên VM2 nếu muốn **tắt hẳn máy VM2** (shutdown/reboot).
+
+### Bật lại
+
+Chỉ cần chạy trên **VM1** — VM2 agent tự reconnect lại cluster:
 
 ```bash
 # 1. Bật RKE2
@@ -427,11 +434,16 @@ kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao write -f tr
 curl http://tnt-engine.internal:30911/api/v1/health
 ```
 
-### Bật lại VM2 (Mode B)
+> Tất cả pods tự restart mà không cần làm thêm gì. Chỉ OpenBao cần re-init vì dev mode lưu keys in-memory.
+
+### Bật/tắt VM2 (chỉ Mode B)
 
 ```bash
-# Trên VM2
-sudo systemctl start rke2-agent
+# Tắt VM2
+sudo systemctl stop rke2-agent   # chạy trên VM2
+
+# Bật lại VM2
+sudo systemctl start rke2-agent  # chạy trên VM2
 
 # Verify trên VM1
 kubectl get nodes -o wide
