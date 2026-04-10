@@ -27,7 +27,14 @@ export default function NamespaceSwitcher() {
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error ?? "Failed to create namespace");
+        // Enterprise-only: give a clear, actionable message
+        if (data.code === "ENTERPRISE_ONLY") {
+          setError("Requires OpenBao or Vault Enterprise. OSS Vault does not support namespaces.");
+        } else if (data.code === "VAULT_UNREACHABLE") {
+          setError("Vault server is unreachable. Check VAULT_ADDR.");
+        } else {
+          setError(data.error ?? "Failed to create namespace");
+        }
         return;
       }
 
@@ -59,10 +66,11 @@ export default function NamespaceSwitcher() {
         {!creating && (
           <button
             onClick={() => setCreating(true)}
-            title="Create new namespace"
-            className="text-slate-400 hover:text-white transition-colors"
+            title="Create new namespace (requires OpenBao or Vault Enterprise)"
+            className="flex items-center gap-1 text-slate-400 hover:text-white transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
+            <span className="text-[9px] text-indigo-400 font-mono leading-none">OpenBao</span>
           </button>
         )}
       </div>

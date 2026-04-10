@@ -74,11 +74,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ namespace: name }, { status: 201 });
   } catch (err) {
     if (err instanceof VaultClientError) {
+      // Vault OSS / non-OpenBao: namespace is an enterprise-only feature
+      const isEnterprise = err.vaultErrors.some((e) =>
+        e.toLowerCase().includes("enterprise")
+      );
+      if (isEnterprise) {
+        return NextResponse.json(
+          {
+            error:
+              "Namespace management requires OpenBao or HashiCorp Vault Enterprise. " +
+              "The current Vault server does not support this feature.",
+            code: "ENTERPRISE_ONLY",
+          },
+          { status: 422 }
+        );
+      }
       return NextResponse.json(
         { error: err.vaultErrors.join(", ") || err.message },
         { status: err.statusCode }
       );
     }
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    // Network / connection error (Vault unreachable)
+    return NextResponse.json(
+      { error: "Cannot reach Vault server. Check VAULT_ADDR connectivity.", code: "VAULT_UNREACHABLE" },
+      { status: 503 }
+    );
   }
 }
