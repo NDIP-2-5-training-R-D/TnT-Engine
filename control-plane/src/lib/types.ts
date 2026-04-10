@@ -20,6 +20,7 @@ export interface HealthData {
   };
   postgres: { connected: boolean };
   redis: { connected: boolean };
+  kafka: { connected: boolean };
   timestamp: string;
 }
 

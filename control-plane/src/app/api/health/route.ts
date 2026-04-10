@@ -4,6 +4,7 @@
 //   - T&T Engine: /api/v1/health
 //   - PostgreSQL: TCP connect on port 5432
 //   - Redis: TCP connect on port 6379
+//   - Kafka: TCP connect on port 9092 (audit durability sink)
 //
 // NEVER returns tokens, cluster IDs, or internal topology to the client.
 
@@ -16,6 +17,8 @@ const PG_HOST = process.env.PG_HOST || "localhost";
 const PG_PORT = parseInt(process.env.PG_PORT || "5432", 10);
 const REDIS_HOST = process.env.REDIS_HOST || "localhost";
 const REDIS_PORT = parseInt(process.env.REDIS_PORT || "6379", 10);
+const KAFKA_HOST = process.env.KAFKA_HOST || "localhost";
+const KAFKA_PORT = parseInt(process.env.KAFKA_PORT || "9092", 10);
 
 /** TCP connectivity check with timeout */
 function tcpProbe(host: string, port: number, timeoutMs = 2000): Promise<boolean> {
@@ -80,11 +83,18 @@ export async function GET() {
   // 4. Redis — direct TCP probe (independent of T&T Engine)
   const redisConnected = await tcpProbe(REDIS_HOST, REDIS_PORT);
 
+  // 5. Kafka — direct TCP probe on the broker listener.
+  //    Doesn't speak the protocol, but proves the broker port is accepting
+  //    connections; a full Kafka health API call would require the admin
+  //    client and a long-lived producer, which we don't run in the BFF.
+  const kafkaConnected = await tcpProbe(KAFKA_HOST, KAFKA_PORT);
+
   return NextResponse.json({
     vault,
     engine,
     postgres: { connected: pgConnected },
     redis: { connected: redisConnected },
+    kafka: { connected: kafkaConnected },
     timestamp,
   });
 }
