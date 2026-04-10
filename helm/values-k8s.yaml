@@ -13,7 +13,10 @@ securityContext:
     drop: ["ALL"]
 
 autoscaling:
-  enabled: false
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
 
 pdb:
   enabled: false

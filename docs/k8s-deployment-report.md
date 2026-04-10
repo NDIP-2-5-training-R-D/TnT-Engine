@@ -1,52 +1,33 @@
-# TnT Engine — K8s Deployment Report
+# TnT Engine — K8s Deployment Guide
 
-**Môi trường:** Ubuntu 24.04 LTS, single VM `Geic-DashCam-VM1` (IP: `10.10.55.11`)  
+**Môi trường:** Ubuntu 24.04 LTS  
 **Ngày triển khai:** 2026-04-09  
-**Trạng thái:** Hoàn tất — toàn bộ stack đang chạy trên Kubernetes
+**Stack:** RKE2 (Kubernetes) + Kong Gateway + PostgreSQL + Redis + OpenBao
 
 ---
 
-## Kiến trúc tổng quan
+## Hai chế độ triển khai
 
-```
-Client
-  │
-  ▼
-Kong Gateway (NodePort :30911)
-  │
-  ▼
-Kong Ingress → tnt-engine Service (ClusterIP)
-  │
-  ▼
-TnT Engine Pod (:8000)
-  │
-  ├── PostgreSQL 16  (data namespace)
-  ├── Redis 7        (data namespace)
-  └── OpenBao 2.5.2  (data namespace)
-```
-
-**Namespace layout:**
-
-| Namespace | Thành phần |
-|-----------|------------|
-| `kube-system` | RKE2, Cilium CNI, CoreDNS, ingress-nginx, metrics-server |
-| `local-path-storage` | local-path-provisioner (StorageClass) |
-| `data` | PostgreSQL, Redis, OpenBao |
-| `gateway` | Kong Gateway, Kong Ingress Controller |
-| `tnt-engine` | TnT Engine app |
+| | Mode A: Single VM | Mode B: Two VM (HA) |
+|--|--|--|
+| Số VM | 1 (VM1) | 2 (VM1 + VM2) |
+| PostgreSQL | 1 instance | Primary (VM1) + Replica (VM2) |
+| Redis | 1 instance | Primary + Replica + 3 Sentinel |
+| Failover | Không | Tự động, 0 downtime |
+| Phù hợp | Dev / Benchmark | Production SLA 99.9% |
 
 ---
 
-## Phần 1: Cài đặt Kubernetes (RKE2)
+## Bước chung 1: Cài đặt RKE2 trên VM1
 
-### 1.1 Cài RKE2
+### Cài RKE2
 
 ```bash
 curl -sfL https://get.rke2.io | sudo sh -
 sudo systemctl enable rke2-server --now
 ```
 
-### 1.2 Cấu hình `/etc/rancher/rke2/config.yaml`
+### Cấu hình `/etc/rancher/rke2/config.yaml`
 
 ```yaml
 token: tnt-engine-secret-2026
@@ -57,7 +38,7 @@ cni: cilium
 node-taint: []
 ```
 
-### 1.3 Cài kubectl và helm
+### Cài kubectl và helm
 
 ```bash
 # kubectl
@@ -73,21 +54,18 @@ sudo chown $USER ~/.kube/config
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 ```
 
-### 1.4 Cài local-path-provisioner (StorageClass)
+### Cài local-path-provisioner (StorageClass)
 
 > RKE2 không có default StorageClass — cần cài thêm để PVC hoạt động.
 
 ```bash
 BASE="https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.28/deploy/"
-FILE="local-path-storage.yaml"
-kubectl apply -f "${BASE}${FILE}"
-
-# Đặt làm default StorageClass
+kubectl apply -f "${BASE}local-path-storage.yaml"
 kubectl patch storageclass local-path \
   -p '{"metadata":{"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
 ```
 
-### 1.5 Kiểm tra node
+### Verify
 
 ```bash
 kubectl get nodes
@@ -97,17 +75,12 @@ kubectl get nodes
 
 ---
 
-## Phần 2: Deploy Kong Gateway
+## Bước chung 2: Deploy Kong Gateway
 
 ```bash
-# Thêm Helm repo
-helm repo add kong https://charts.konghq.com
-helm repo update
-
-# Tạo namespace
+helm repo add kong https://charts.konghq.com && helm repo update
 kubectl create namespace gateway
 
-# Cài Kong với KIC (Kong Ingress Controller)
 helm upgrade --install kong kong/ingress \
   -n gateway \
   --set controller.ingressController.enabled=true \
@@ -118,26 +91,58 @@ helm upgrade --install kong kong/ingress \
 
 ```bash
 kubectl -n gateway get pods
-# kong-controller-...   1/1 Running
-# kong-gateway-...      1/1 Running
-
 kubectl -n gateway get svc kong-gateway-proxy
 # PORT(S): 80:30911/TCP, 443:32592/TCP
 ```
 
 ---
 
-## Phần 3: Deploy Data Layer
+## Bước chung 3: Deploy OpenBao
 
-### 3.1 Tạo namespace
+```bash
+helm repo add hashicorp https://helm.releases.hashicorp.com && helm repo update
+
+helm upgrade --install openbao openbao/openbao \
+  -n data --create-namespace \
+  --set server.dev.enabled=true \
+  --set server.dev.devRootToken=root-token-dev \
+  --set injector.enabled=true
+
+kubectl -n data wait pod/openbao-0 --for=condition=Ready --timeout=60s
+```
+
+**Khởi tạo transit engine và keys:**
+
+```bash
+kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao secrets enable transit
+kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao write -f transit/keys/tnt-key
+kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao write -f transit/keys/tnt-hmac type=hmac key_size=32
+```
+
+---
+
+## Bước chung 4: Build TnT Engine image
+
+> RKE2 dùng containerd, không dùng Docker daemon. Image phải import qua `ctr`.
+
+```bash
+cd ~/Desktop/TnT-Engine
+docker build -t tnt-engine:vmbench .
+docker save tnt-engine:vmbench | sudo ctr -n k8s.io images import -
+sudo ctr -n k8s.io images list | grep tnt-engine
+```
+
+---
+
+## Mode A: Single VM
+
+### A1: Deploy PostgreSQL + Redis
 
 ```bash
 kubectl create namespace data
 ```
 
-### 3.2 PostgreSQL 16
-
-Lưu vào `/tmp/postgres.yaml`:
+**PostgreSQL** — lưu vào `/tmp/postgres.yaml`:
 
 ```yaml
 apiVersion: v1
@@ -149,17 +154,6 @@ type: Opaque
 stringData:
   POSTGRES_PASSWORD: tnt_password
   POSTGRES_DB: tnt_engine
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: postgres-pvc
-  namespace: data
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 5Gi
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -191,10 +185,14 @@ spec:
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
-      volumes:
-      - name: data
-        persistentVolumeClaim:
-          claimName: postgres-pvc
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 5Gi
 ---
 apiVersion: v1
 kind: Service
@@ -212,18 +210,10 @@ spec:
 ```bash
 kubectl apply -f /tmp/postgres.yaml
 kubectl -n data wait pod/postgres-0 --for=condition=Ready --timeout=60s
+kubectl -n data exec postgres-0 -- psql -U postgres -d tnt_engine -f /dev/stdin < sql/schema.sql
 ```
 
-**Apply schema:**
-
-```bash
-kubectl -n data exec postgres-0 -- psql -U postgres -d tnt_engine \
-  -f /dev/stdin < sql/schema.sql
-```
-
-### 3.3 Redis 7
-
-Lưu vào `/tmp/redis.yaml`:
+**Redis** — lưu vào `/tmp/redis.yaml`:
 
 ```yaml
 apiVersion: apps/v1
@@ -278,145 +268,114 @@ kubectl apply -f /tmp/redis.yaml
 kubectl -n data wait pod/redis-0 --for=condition=Ready --timeout=60s
 ```
 
-### 3.4 OpenBao (dev mode)
-
-```bash
-helm repo add hashicorp https://helm.releases.hashicorp.com
-helm repo update
-
-helm upgrade --install openbao openbao/openbao \
-  -n data \
-  --set server.dev.enabled=true \
-  --set server.dev.devRootToken=root-token-dev \
-  --set injector.enabled=true
-
-kubectl -n data wait pod/openbao-0 --for=condition=Ready --timeout=60s
-```
-
-**Khởi tạo transit engine và keys:**
-
-```bash
-# Enable transit
-kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev \
-  bao secrets enable transit
-
-# Tạo encryption key
-kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev \
-  bao write -f transit/keys/tnt-key
-
-# Tạo HMAC key
-kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev \
-  bao write -f transit/keys/tnt-hmac type=hmac
-```
-
----
-
-## Phần 4: Build và import TnT Engine image
-
-> RKE2 dùng containerd, không dùng Docker daemon. Image phải được import qua `ctr`.
+### A2: Deploy TnT Engine
 
 ```bash
 cd ~/Desktop/TnT-Engine
-
-# Build image
-docker build -t tnt-engine:vmbench .
-
-# Import vào RKE2 containerd
-docker save tnt-engine:vmbench | sudo ctr -n k8s.io images import -
-
-# Verify
-sudo ctr -n k8s.io images list | grep tnt-engine
+bash scripts/k8s-deploy.sh
 ```
 
----
-
-## Phần 5: Deploy TnT Engine qua Helm
-
-### 5.1 Values file (`helm/values-k8s.yaml`)
-
-```yaml
-replicaCount: 1
-
-image:
-  repository: tnt-engine
-  tag: vmbench
-  pullPolicy: Never
-
-securityContext:
-  runAsNonRoot: false
-  readOnlyRootFilesystem: false
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop: ["ALL"]
-
-autoscaling:
-  enabled: false
-
-pdb:
-  enabled: false
-
-ingress:
-  enabled: true
-  className: kong
-  annotations: {}
-  hosts:
-    - host: tnt-engine.internal
-      paths:
-        - path: /
-          pathType: Prefix
-
-config:
-  TNT_DB_HOST: "postgres.data.svc.cluster.local"
-  TNT_DB_PORT: "5432"
-  TNT_DB_NAME: "tnt_engine"
-  TNT_DB_USER: "postgres"
-  TNT_DB_POOL_MIN: "2"
-  TNT_DB_POOL_MAX: "10"
-  TNT_REDIS_URL: "redis://:tnt_redis_pass@redis.data.svc.cluster.local:6379/0"
-  TNT_CRYPTO_BASE_URL: "http://openbao.data.svc.cluster.local:8200/v1"
-  TNT_CRYPTO_VERIFY_SSL: "false"
-  TNT_ENVIRONMENT: "development"
-  TNT_L1_MAX_SIZE: "1000"
-  TNT_WORKER_CLEANUP_INTERVAL_SECONDS: "120"
-
-secrets:
-  TNT_DB_PASSWORD: "tnt_password"
-  TNT_CRYPTO_TOKEN: "root-token-dev"
-
-networkPolicy:
-  enabled: false
-```
-
-> **Lưu ý:** `networkPolicy: enabled: false` là bắt buộc vì PostgreSQL/Redis/OpenBao nằm ở namespace `data`, không cùng namespace với app. NetworkPolicy mặc định chỉ cho phép egress trong cùng namespace.
-
-### 5.2 Deploy
-
+Script chạy:
 ```bash
-cd ~/Desktop/TnT-Engine
 helm upgrade --install tnt-engine ./helm/tnt-engine \
   -n tnt-engine --create-namespace \
   -f ./helm/values-k8s.yaml
 ```
 
-### 5.3 Verify
+### A3: Verify
 
 ```bash
 kubectl -n tnt-engine get pods
-# NAME                          READY   STATUS    RESTARTS   AGE
-# tnt-engine-xxxxx-xxxxx        1/1     Running   0          ...
+curl http://tnt-engine.internal:30911/api/v1/health
 ```
 
 ---
 
-## Phần 6: Truy cập app
+## Mode B: Two VM (HA)
 
-### Kiểm tra health endpoint
+### B1: Setup VM2 làm Worker Node
+
+Lấy token từ VM1:
+
+```bash
+sudo cat /var/lib/rancher/rke2/server/node-token
+```
+
+Mở firewall VM1 cho VM2:
+
+```bash
+sudo ufw allow from 10.10.55.12 comment "VM2 node"
+sudo ufw reload
+```
+
+Copy script lên VM2, sửa `RKE2_TOKEN`, rồi chạy:
+
+```bash
+scp scripts/ha-setup-vm2.sh linhnt1@10.10.55.12:~/Desktop/
+ssh linhnt1@10.10.55.12
+nano ~/Desktop/ha-setup-vm2.sh   # sửa RKE2_TOKEN
+bash ~/Desktop/ha-setup-vm2.sh
+```
+
+Script tự động: mở UFW ports (8472/udp Cilium VXLAN, 10250/tcp Kubelet), cài RKE2 agent, join cluster.
+
+Verify trên **VM1**:
+
+```bash
+kubectl get nodes -o wide
+# geic-dashcam-vm1   Ready    control-plane,etcd   ...
+# geic-dashcam-vm2   Ready    <none>               ...
+```
+
+### B2: Deploy HA Storage (PostgreSQL + Redis)
+
+Trên **VM1**:
+
+```bash
+bash scripts/ha-setup-storage.sh
+```
+
+Script tự động:
+- Label nodes (VM1=primary, VM2=replica)
+- Deploy PostgreSQL Primary (VM1) + Replica (VM2) + streaming replication
+- Tạo replication user và cập nhật `pg_hba.conf`
+- Deploy Redis Primary (VM1) + Replica (VM2) + 3 Sentinel (quorum=2)
+
+Verify:
+
+```bash
+kubectl -n data get pods -o wide
+# postgres-primary-0   1/1 Running   geic-dashcam-vm1
+# postgres-replica-0   1/1 Running   geic-dashcam-vm2
+# redis-primary-0      1/1 Running   geic-dashcam-vm1
+# redis-replica-0      1/1 Running   geic-dashcam-vm2
+# redis-sentinel-*     1/1 Running   (3 pods)
+```
+
+### B3: Deploy TnT Engine
+
+Giống Mode A — deploy TnT Engine dùng `postgres.data.svc.cluster.local` (trỏ vào primary):
+
+```bash
+bash scripts/k8s-deploy.sh
+```
+
+### B4: Test Failover
+
+```bash
+bash scripts/ha-test-failover.sh
+```
+
+Kết quả mong đợi: **60/60 success, 0 errors** cho cả PostgreSQL và Redis failover.
+
+---
+
+## Truy cập app
 
 ```bash
 # Thêm hostname vào /etc/hosts (chỉ cần làm 1 lần)
 echo "10.10.55.11 tnt-engine.internal" | sudo tee -a /etc/hosts
 
-# Gọi qua Kong
 curl http://tnt-engine.internal:30911/api/v1/health
 ```
 
@@ -425,13 +384,7 @@ curl http://tnt-engine.internal:30911/api/v1/health
 {
   "status": "ok",
   "circuit_breaker": "CLOSED",
-  "l1_cache_size": 0,
-  "vault": {
-    "status": "healthy",
-    "initialized": true,
-    "sealed": false,
-    "version": "2.5.2"
-  }
+  "vault": { "status": "healthy", "sealed": false }
 }
 ```
 
@@ -441,30 +394,73 @@ curl http://tnt-engine.internal:30911/api/v1/health
 |--------|------|-------|
 | GET | `/api/v1/health` | Full health check |
 | GET | `/api/v1/ready` | Readiness probe |
-| POST | `/api/v1/tokens` | Tạo token mới |
-| GET | `/api/v1/tokens/{id}` | Lấy token |
-| DELETE | `/api/v1/tokens/{id}` | Thu hồi token |
+| POST | `/api/v1/tokenize` | Tokenize giá trị |
+| POST | `/api/v1/detokenize` | Detokenize token |
+| GET | `/metrics/` | Prometheus metrics |
 
-### Ví dụ tạo token
+---
+
+## Khởi động và tắt
+
+### Tắt
 
 ```bash
-curl -s -X POST http://tnt-engine.internal:30911/api/v1/tokens \
-  -H "Content-Type: application/json" \
-  -d '{"tenant_id":"tenant-001","metadata":{"user":"test"}}'
+kubectl -n tnt-engine scale deployment tnt-engine --replicas=0
+sudo systemctl stop rke2-server
+```
+
+### Bật lại (VM1)
+
+```bash
+# 1. Bật RKE2
+sudo systemctl start rke2-server
+
+# 2. Chờ pods tự lên (~1-2 phút)
+kubectl get pods -A | grep -v Running | grep -v Completed
+
+# 3. Re-init OpenBao (bắt buộc vì dev mode mất keys sau mỗi restart)
+kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao secrets enable transit
+kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao write -f transit/keys/tnt-key
+kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao write -f transit/keys/tnt-hmac type=hmac key_size=32
+
+# 4. Verify
+curl http://tnt-engine.internal:30911/api/v1/health
+```
+
+### Bật lại VM2 (Mode B)
+
+```bash
+# Trên VM2
+sudo systemctl start rke2-agent
+
+# Verify trên VM1
+kubectl get nodes -o wide
+```
+
+### Xóa và cài lại
+
+```bash
+# Chỉ xóa TnT Engine (giữ data)
+helm uninstall tnt-engine -n tnt-engine
+
+# Xóa toàn bộ
+kubectl delete namespace tnt-engine data gateway
 ```
 
 ---
 
-## Phần 7: Troubleshooting
-
-### Pod CrashLoopBackOff
+## Troubleshooting
 
 ```bash
 # Xem logs crash
 kubectl -n tnt-engine logs <pod-name> --previous
-
-# Kiểm tra events
 kubectl -n tnt-engine describe pod <pod-name>
+
+# Logs realtime
+kubectl -n tnt-engine logs -f deployment/tnt-engine
+
+# Restart deployment
+kubectl -n tnt-engine rollout restart deployment tnt-engine
 ```
 
 **Nguyên nhân thường gặp:**
@@ -473,207 +469,34 @@ kubectl -n tnt-engine describe pod <pod-name>
 |-------------|-------------|-----|
 | Connection refused tới DB/Redis/OpenBao | NetworkPolicy block egress cross-namespace | `networkPolicy: enabled: false` trong values |
 | ImagePullBackOff | Image chưa import vào containerd | `docker save ... \| sudo ctr -n k8s.io images import -` |
-| CrashLoopBackOff + schema error | Schema chưa được apply | `kubectl exec postgres-0 -- psql ... < sql/schema.sql` |
-
-### Xem logs app
-
-```bash
-kubectl -n tnt-engine logs -f deployment/tnt-engine
-```
-
-### Restart deployment
-
-```bash
-kubectl -n tnt-engine rollout restart deployment tnt-engine
-kubectl -n tnt-engine rollout status deployment tnt-engine
-```
+| CrashLoopBackOff + schema error | Schema chưa apply | `kubectl exec postgres-0 -- psql ... < sql/schema.sql` |
+| postgres-replica Init:0/1 mãi | UFW VM2 block Cilium VXLAN | Mở port 8472/udp trên VM2 |
+| redis-sentinel CrashLoopBackOff | DNS resolve hostname fail lúc startup | Script `ha-setup-storage.sh` đã fix — dùng IP thay hostname |
 
 ---
 
-## Phần 8: Trạng thái hiện tại (2026-04-09)
+## Tasks tiếp theo
 
-| Component | Version | Status | Note |
-|-----------|---------|--------|------|
-| RKE2 | v1.32+ | Running | Single-node, Cilium CNI |
-| Kong Gateway | latest | Running | NodePort HTTP:30911, HTTPS:32592 |
-| PostgreSQL | 16 | Running | 5Gi PVC, schema applied |
-| Redis | 7 | Running | 2Gi PVC, auth enabled |
-| OpenBao | 2.5.2 | Running | Dev mode, transit enabled |
-| TnT Engine | 0.4.0 (vmbench) | Running 1/1 | Healthy, all deps OK |
+- [ ] Deploy Prometheus + Grafana — dashboard metrics realtime
+- [ ] Cấu hình NetworkPolicy đúng cho production (thay vì `enabled: false`)
 
-**Bước tiếp theo:** xem Phần 9, 10, 11 bên dưới.
-
----
-
-## Phần 9: Khởi động và tắt app
-
-### Tắt
-
-```bash
-# Bước 1 — Graceful shutdown app
-kubectl -n tnt-engine scale deployment tnt-engine --replicas=0
-
-# Bước 2 — Tắt K8s
-sudo systemctl stop rke2-server
-```
-
-### Bật lại
-
-K8s tự bật lại **tất cả pods** khi RKE2 start — không cần làm thủ công từng service.  
-Chỉ cần 3 bước:
-
-```bash
-# Bước 1 — Bật RKE2
-sudo systemctl start rke2-server
-
-# Bước 2 — Chờ pods tự lên (~1-2 phút)
-kubectl get pods -A -w
-# Chờ postgres-0, redis-0, openbao-0, tnt-engine đều Running rồi Ctrl+C
-
-# Bước 3 — Re-init OpenBao (bắt buộc vì dev mode mất keys sau mỗi lần restart)
-kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao secrets enable transit
-kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao write -f transit/keys/tnt-key
-kubectl -n data exec openbao-0 -- env VAULT_TOKEN=root-token-dev bao write -f transit/keys/tnt-hmac type=hmac
-```
-
-**Verify:**
-
-```bash
-curl http://tnt-engine.internal:30911/api/v1/health
-# Kết quả mong đợi: "status":"ok" và "vault":"healthy"
-```
-
-> Nếu TnT Engine crash trước khi OpenBao kịp lên, nó sẽ tự restart và healthy sau khi OpenBao sẵn sàng — không cần can thiệp thủ công.
-
-### Xóa hoàn toàn TnT Engine (giữ data layer)
-
-```bash
-helm uninstall tnt-engine -n tnt-engine
-```
-
-### Xóa toàn bộ và cài lại từ đầu
-
-```bash
-kubectl delete namespace tnt-engine data gateway
-# Cài lại từ Phần 2 trở đi
-```
-
----
-
-## Phần 10: Task tiếp theo
-
-### Task 1 — Chạy benchmark
-
-**Mục tiêu đo:**
-
-| Metric | Target |
-|--------|--------|
-| p99 latency | < 200ms |
-| Error rate | < 0.1% |
-| Cache hit rate | > 80% |
-| Uptime | 99.9% (≤ 8.76h/year downtime) |
-
-**Cài `hey` (load testing tool):**
-
-```bash
-# Trên Ubuntu
-go install github.com/rakyll/hey@latest
-# hoặc
-sudo apt install hey
-```
-
-**Bước 1 — Smoke test (verify endpoints hoạt động):**
-
-```bash
-BASE="http://tnt-engine.internal:30911"
-
-# Health
-curl -s $BASE/api/v1/health | python3 -m json.tool
-
-# Tạo token
-TOKEN_RESP=$(curl -s -X POST $BASE/api/v1/tokens \
-  -H "Content-Type: application/json" \
-  -d '{"tenant_id":"tenant-001","metadata":{"env":"bench"}}')
-echo $TOKEN_RESP
-
-TOKEN_ID=$(echo $TOKEN_RESP | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
-
-# Lấy token
-curl -s $BASE/api/v1/tokens/$TOKEN_ID | python3 -m json.tool
-
-# Detokenize
-curl -s -X DELETE $BASE/api/v1/tokens/$TOKEN_ID
-```
-
-**Bước 2 — Baseline load test:**
-
-```bash
-# 50 concurrent, 1000 requests
-hey -n 1000 -c 50 \
-  -m POST \
-  -H "Content-Type: application/json" \
-  -d '{"tenant_id":"tenant-001","metadata":{"env":"bench"}}' \
-  http://tnt-engine.internal:30911/api/v1/tokens
-```
-
-**Bước 3 — Spike test:**
-
-```bash
-# 200 concurrent, 5000 requests
-hey -n 5000 -c 200 \
-  -m GET \
-  http://tnt-engine.internal:30911/api/v1/health
-```
-
-**Bước 4 — Soak test (10 phút):**
-
-```bash
-# 20 concurrent, chạy liên tục 10 phút
-hey -z 10m -c 20 \
-  -m POST \
-  -H "Content-Type: application/json" \
-  -d '{"tenant_id":"tenant-001","metadata":{"env":"soak"}}' \
-  http://tnt-engine.internal:30911/api/v1/tokens
-```
-
----
-
-### Task 3 — Observability (Prometheus + Grafana)
-
-TnT Engine đã expose metrics tại `/metrics` (Prometheus format). Cần deploy stack observability để dashboard được.
-
-**Deploy kube-prometheus-stack:**
+### Observability (Prometheus + Grafana)
 
 ```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-
 kubectl create namespace monitoring
 
 helm upgrade --install kube-prom prometheus-community/kube-prometheus-stack \
   -n monitoring \
   --set grafana.service.type=NodePort \
-  --set grafana.service.nodePort=32000 \
-  --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false \
-  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+  --set grafana.service.nodePort=32000
 ```
 
-**Truy cập Grafana:**
-- URL: `http://10.10.55.11:32000`
-- User: `admin` / Password: `prom-operator`
+Truy cập Grafana: `http://10.10.55.11:32000` — user `admin` / pass `prom-operator`
 
-**Metrics TnT Engine tự động scrape** vì pod đã có annotations:
-```yaml
-prometheus.io/scrape: "true"
-prometheus.io/port: "8000"
-prometheus.io/path: "/metrics"
-```
+### NetworkPolicy cho production
 
----
-
-### Task 4 — Cấu hình NetworkPolicy đúng (production hardening)
-
-Hiện tại `networkPolicy: enabled: false` để bypass vấn đề cross-namespace. Nếu cần bật lại cho môi trường production, sửa `helm/tnt-engine/templates/networkpolicy.yaml` để thêm `namespaceSelector`:
+Sửa `helm/tnt-engine/templates/networkpolicy.yaml` để thêm `namespaceSelector`:
 
 ```yaml
 egress:
@@ -681,15 +504,13 @@ egress:
       - namespaceSelector:
           matchLabels:
             kubernetes.io/metadata.name: data
-        podSelector:
-          matchLabels:
-            app: postgres
     ports:
       - port: 5432
-  # tương tự cho redis, openbao
+      - port: 6379
+      - port: 8200
 ```
 
-Sau đó bật lại trong values-k8s.yaml:
+Sau đó bật lại:
 ```yaml
 networkPolicy:
   enabled: true
