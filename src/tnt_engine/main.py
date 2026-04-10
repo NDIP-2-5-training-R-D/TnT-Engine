@@ -141,8 +141,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.audit_writer = audit_writer
 
     # OpenBao health checker (for /health and /ready endpoints)
-    vault_health_checker = VaultHealthChecker(cfg.crypto_base_url, settings=cfg)
-    app.state.vault_health_checker = vault_health_checker
+    # Skip when using sandbox backend — no real Vault is running.
+    if cfg.crypto_backend.lower() != "sandbox":
+        vault_health_checker = VaultHealthChecker(cfg.crypto_base_url, settings=cfg)
+        app.state.vault_health_checker = vault_health_checker
+    else:
+        vault_health_checker = None
+        app.state.vault_health_checker = None
 
     yield
 
@@ -150,7 +155,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await shutdown.initiate()
     await audit_writer.stop()  # Drain audit buffer before closing DB
     await cleanup_worker.stop()
-    await vault_health_checker.close()
+    if vault_health_checker is not None:
+        await vault_health_checker.close()
     await cb_backend.close()
     await layered_cache.close()
     await db.close()
