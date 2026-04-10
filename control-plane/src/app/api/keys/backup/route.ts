@@ -16,7 +16,7 @@ const RATE_LIMIT_MS = 5 * 60_000; // 5 minutes
 export async function POST(request: NextRequest) {
   // RBAC
   const { requireRole } = await import("@/lib/rbac");
-  const auth = await requireRole(request, ["admin", "operator"]);
+  const auth = await requireRole(request, ["admin", "manager"]);
   if (auth.error) return auth.error;
 
   const now = Date.now();

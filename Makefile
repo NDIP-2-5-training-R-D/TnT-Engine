@@ -71,7 +71,7 @@ push: ## Push Docker image to registry
 
 # ── Helm deploy ──────────────────────────────────────────────────────
 
-deploy: ## Helm deploy (ENV=dev|staging|prod)
+deploy: ## Helm deploy (ENV=dev|staging|prod|local)
 	helm upgrade --install $(RELEASE) ./helm/tnt-engine \
 		--namespace $(NAMESPACE) --create-namespace \
 		--values ./helm/values-$(ENV).yaml \

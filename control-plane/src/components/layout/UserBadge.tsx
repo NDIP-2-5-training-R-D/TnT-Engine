@@ -6,8 +6,8 @@ import clsx from "clsx";
 
 const roleColors: Record<string, string> = {
   admin: "bg-vault-red/20 text-vault-red border-vault-red/30",
-  operator: "bg-vault-yellow/20 text-vault-yellow border-vault-yellow/30",
-  viewer: "bg-vault-blue/20 text-vault-blue border-vault-blue/30",
+  manager: "bg-vault-yellow/20 text-vault-yellow border-vault-yellow/30",
+  requester: "bg-vault-blue/20 text-vault-blue border-vault-blue/30",
 };
 
 export default function UserBadge() {
@@ -15,7 +15,7 @@ export default function UserBadge() {
 
   if (!session?.user) return null;
 
-  const role = (session.user as any).role || "viewer";
+  const role = (session.user as any).role || "requester";
   const name = session.user.name || "Unknown";
 
   return (

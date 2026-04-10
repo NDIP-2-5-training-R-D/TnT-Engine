@@ -1,43 +1,32 @@
 /**
  * PII field classification — mirrors governance/classification.py exactly.
  * Extracted as a pure utility for use in BFF routes and unit tests.
+ *
+ * Source of truth: cp_field_classifications table (postgres mode)
+ *                  or /tmp/tnt-classification.json (file mode, default)
+ * Fallback when store not yet loaded: CLASSIFICATION_SEED (same values as before).
  */
 
 import type { SensitivityLevel } from "./types";
+import {
+  classifyFieldSync,
+  CLASSIFICATION_SEED,
+  UNCLASSIFIED,
+  type Classification,
+} from "./classification-store";
 
-export interface Classification {
-  level: SensitivityLevel;
-  allowed: string[];
-}
+export type { Classification };
 
-/** Canonical field → classification map (mirrors classification.py). */
-export const CLASSIFICATION_MAP: Record<string, Classification> = {
-  ssn:             { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE"] },
-  card:            { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE"] },
-  credit_card:     { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE"] },
-  tax_id:          { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE"] },
-  bank_account:    { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE"] },
-  passport:        { level: "HIGH_SENSITIVE", allowed: ["TOKENIZE"] },
-  email:           { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC"] },
-  phone:           { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC"] },
-  date_of_birth:   { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC"] },
-  drivers_license: { level: "MEDIUM",         allowed: ["TOKENIZE", "MASK", "HMAC"] },
-  name:            { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "PASSTHROUGH"] },
-  first_name:      { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "PASSTHROUGH"] },
-  last_name:       { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "PASSTHROUGH"] },
-  address:         { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "PASSTHROUGH"] },
-  city:            { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "PASSTHROUGH"] },
-  zip_code:        { level: "LOW",            allowed: ["TOKENIZE", "MASK", "HMAC", "PASSTHROUGH"] },
-};
-
-const UNCLASSIFIED: Classification = {
-  level: "UNCLASSIFIED",
-  allowed: ["TOKENIZE", "MASK", "HMAC"],
-};
+/**
+ * CLASSIFICATION_MAP is kept for backward compatibility.
+ * It reflects the current in-memory cache (seeded from DB / file on startup).
+ * Use classifyField() for live lookups.
+ */
+export const CLASSIFICATION_MAP: Record<string, Classification> = CLASSIFICATION_SEED;
 
 /** Classify a field type. Returns UNCLASSIFIED for unknown fields. */
 export function classifyField(fieldType: string): Classification {
-  return CLASSIFICATION_MAP[fieldType.toLowerCase()] ?? UNCLASSIFIED;
+  return classifyFieldSync(fieldType);
 }
 
 /**
@@ -50,3 +39,6 @@ export function checkGovernance(fieldType: string, operation: string): string | 
   if (c.allowed.includes(operation)) return null;
   return `Operation '${operation}' is not permitted for field '${fieldType}' (${c.level}). Allowed: ${c.allowed.join(", ")}`;
 }
+
+export { UNCLASSIFIED };
+export type { SensitivityLevel };

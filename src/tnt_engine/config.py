@@ -103,6 +103,13 @@ class Settings(BaseSettings):
     audit_retry_backoff_seconds: float = 1.0
     audit_dlq_path: str = "/tmp/tnt-audit-dlq.jsonl"
 
+    # Kafka (audit durability sink)
+    kafka_enabled: bool = False
+    kafka_bootstrap_servers: str = "localhost:9092"
+    kafka_audit_topic: str = "tnt.audit"
+    kafka_client_id: str = "tnt-engine"
+    kafka_request_timeout_seconds: float = 10.0
+
     # Workers
     worker_cleanup_interval_seconds: int = 60
     worker_cleanup_batch_size: int = 1000

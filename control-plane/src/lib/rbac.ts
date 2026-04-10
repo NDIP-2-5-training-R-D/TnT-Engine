@@ -2,13 +2,15 @@
  * Role-Based Access Control (RBAC) for Control Plane API routes.
  *
  * Permissions matrix:
- *   admin    → ALL actions (seal, unseal, rotate, delete, policy, approve, backup, restore)
- *   operator → rotate, backup, view, unseal (no seal, no delete, no policy write)
- *   viewer   → read-only (dashboard, health, metrics, audit, keys list)
+ *   admin     → ALL actions (seal, unseal, rotate, delete, policy, approve, backup, restore, manage users)
+ *   manager   → Full permissions within namespace (rotate, backup, policy, approve, delete, seal, unseal)
+ *               Can approve/reject requester requests. Cannot manage system-level users.
+ *   requester → Read-only + generate_secret_id. Cannot approve. Cannot manage other users.
+ *               Must submit ROLE_ASSIGNMENT requests for manager/admin to approve.
  *
  * Usage in API routes:
  *   import { requireRole } from "@/lib/rbac";
- *   const auth = await requireRole(request, ["admin", "operator"]);
+ *   const auth = await requireRole(request, ["admin", "manager"]);
  *   if (auth.error) return auth.error;
  *   // auth.user is available
  */
@@ -68,7 +70,7 @@ export async function requireRole(
 
 /** Read-only check — any authenticated user */
 export async function requireAuth(_request: NextRequest): Promise<AuthResult> {
-  return requireRole(_request, ["admin", "operator", "viewer"]);
+  return requireRole(_request, ["admin", "manager", "requester"]);
 }
 
 /** Permission definitions for documentation */
@@ -77,13 +79,16 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "view_dashboard", "view_audit", "view_keys", "view_policies",
     "rotate_key", "seal_vault", "unseal_vault", "init_vault",
     "create_policy", "generate_secret_id", "backup", "restore",
+    "approve_action", "delete_key", "manage_users",
+  ],
+  manager: [
+    "view_dashboard", "view_audit", "view_keys", "view_policies",
+    "rotate_key", "seal_vault", "unseal_vault",
+    "create_policy", "generate_secret_id", "backup",
     "approve_action", "delete_key",
   ],
-  operator: [
+  requester: [
     "view_dashboard", "view_audit", "view_keys", "view_policies",
-    "rotate_key", "unseal_vault", "backup", "generate_secret_id",
-  ],
-  viewer: [
-    "view_dashboard", "view_audit", "view_keys", "view_policies",
+    "generate_secret_id",
   ],
 };

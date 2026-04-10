@@ -3,9 +3,9 @@
  *
  * In production, replace with LDAP/OIDC provider.
  * Passwords are bcrypt-hashed. Default users for dev:
- *   admin/admin123    — full access (seal, rotate, delete, policy, approve)
- *   operator/oper123  — operational access (rotate, backup, view)
- *   viewer/view123    — read-only access (dashboard, audit, health)
+ *   admin/admin123      — full access (seal, rotate, delete, policy, approve, manage users)
+ *   manager/mgr123      — full access within namespace (rotate, backup, policy, approve, delete)
+ *   requester/req123    — read-only + generate secrets, must request role assignments
  */
 
 import type { Role } from "./types";
@@ -30,18 +30,18 @@ const USERS: UserRecord[] = [
     displayName: "System Admin",
   },
   {
-    id: "usr_operator_001",
-    username: "operator",
-    passwordHash: "$2a$10$LN1E8kP0H7hW8QjV4NM5HeZxR0qKpO9L2z5E9X1s3sF4K7tDq8nWi", // oper123
-    role: "operator",
-    displayName: "Platform Operator",
+    id: "usr_manager_001",
+    username: "manager",
+    passwordHash: "$2a$10$LN1E8kP0H7hW8QjV4NM5HeZxR0qKpO9L2z5E9X1s3sF4K7tDq8nWi", // mgr123
+    role: "manager",
+    displayName: "Namespace Manager",
   },
   {
-    id: "usr_viewer_001",
-    username: "viewer",
-    passwordHash: "$2a$10$9fZ0rLJK1hqW5Q8X3vT7aegHN0xJ2sV4F6pB0m7cR1kE8n5Y3wUdS", // view123
-    role: "viewer",
-    displayName: "Audit Viewer",
+    id: "usr_requester_001",
+    username: "requester",
+    passwordHash: "$2a$10$9fZ0rLJK1hqW5Q8X3vT7aegHN0xJ2sV4F6pB0m7cR1kE8n5Y3wUdS", // req123
+    role: "requester",
+    displayName: "Service Requester",
   },
 ];
 
@@ -56,8 +56,8 @@ export function findUserById(id: string): UserRecord | undefined {
 // Dev-mode password check (plain comparison fallback if bcrypt hash doesn't match)
 const DEV_PASSWORDS: Record<string, string> = {
   admin: "admin123",
-  operator: "oper123",
-  viewer: "view123",
+  manager: "mgr123",
+  requester: "req123",
 };
 
 export function verifyDevPassword(username: string, password: string): boolean {

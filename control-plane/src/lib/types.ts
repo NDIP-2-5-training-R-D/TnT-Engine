@@ -20,6 +20,7 @@ export interface HealthData {
   };
   postgres: { connected: boolean };
   redis: { connected: boolean };
+  kafka: { connected: boolean };
   timestamp: string;
 }
 
@@ -202,7 +203,7 @@ export interface SealResponse {
   sealed: boolean;
 }
 
-export type Role = "admin" | "operator" | "viewer";
+export type Role = "admin" | "manager" | "requester";
 
 export interface MutationResponse {
   success: boolean;

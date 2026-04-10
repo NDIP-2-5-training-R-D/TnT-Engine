@@ -31,7 +31,7 @@ echo "[init-openbao] Creating tnt-hmac..."
 curl -sf -X POST "${VAULT_ADDR}/v1/transit/keys/tnt-hmac" \
     -H "X-Vault-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d '{"type":"hmac"}' 2>/dev/null || echo "[init-openbao] tnt-hmac already exists."
+    -d '{"type":"hmac","key_size":32}' 2>/dev/null || echo "[init-openbao] tnt-hmac already exists."
 
 echo "[init-openbao] Creating tnt-aes-gcm (AES-256-GCM96, for AES256_GCM96 transformation)..."
 curl -sf -X POST "${VAULT_ADDR}/v1/transit/keys/tnt-aes-gcm" \

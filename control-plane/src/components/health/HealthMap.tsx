@@ -9,8 +9,8 @@ export default function HealthMap() {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {[1, 2, 3, 4, 5].map((i) => (
           <div key={i} className="rounded-xl border border-slate-700 bg-slate-800 p-4 animate-pulse h-32" />
         ))}
       </div>
@@ -36,7 +36,7 @@ export default function HealthMap() {
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <StatusCard
           title="OpenBao Vault"
           status={data.vault.status}
@@ -56,6 +56,11 @@ export default function HealthMap() {
         <StatusCard
           title="Redis Cache"
           status={data.redis.connected ? "connected" : "disconnected"}
+        />
+        <StatusCard
+          title="Kafka (Audit)"
+          status={data.kafka.connected ? "connected" : "disconnected"}
+          details="Durability sink"
         />
       </div>
     </div>

@@ -19,7 +19,7 @@ const RATE_LIMIT_MS = 30_000;
 export async function POST(request: NextRequest) {
   // RBAC: admin or operator
   const { requireRole } = await import("@/lib/rbac");
-  const auth = await requireRole(request, ["admin", "operator"]);
+  const auth = await requireRole(request, ["admin", "manager"]);
   if (auth.error) return auth.error;
 
   // Security: header check

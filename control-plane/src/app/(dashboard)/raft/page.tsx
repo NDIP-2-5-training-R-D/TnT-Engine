@@ -271,7 +271,7 @@ export default function RaftClusterPage() {
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
-  const role    = (session?.user as { role?: string })?.role ?? "viewer";
+  const role    = (session?.user as { role?: string })?.role ?? "requester";
   const isAdmin = role === "admin";
 
   // ── Fetch ──────────────────────────────────────────────────────────

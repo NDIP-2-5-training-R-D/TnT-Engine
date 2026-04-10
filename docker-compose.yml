@@ -34,15 +34,51 @@ services:
     environment:
       BAO_DEV_ROOT_TOKEN_ID: dev-token
       BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      BAO_ADDR: "http://127.0.0.1:8200"
     ports:
       - "8200:8200"
     command: server -dev
     healthcheck:
       test: ["CMD", "bao", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  # Kafka — single-node KRaft (no Zookeeper) durability sink for audit logs.
+  # Uses the official apache/kafka image (bitnami archived their free catalog).
+  kafka:
+    image: apache/kafka:3.7.0
+    ports:
+      - "9092:9092"
+    environment:
+      # KRaft config — single combined controller+broker node
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "controller,broker"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # Auto-create the audit topic on first publish
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: "3"
+      KAFKA_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      # KRaft requires a cluster id; any 22-char base64 URL-safe string works.
+      CLUSTER_ID: "5L6g3nShT-eMCtK--X86sw"
+      KAFKA_LOG_DIRS: "/var/lib/kafka/data"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 12
+      start_period: 20s
 
   # T&T Engine — the Python app itself
   tnt-engine:
@@ -64,13 +100,18 @@ services:
       TNT_CRYPTO_BACKEND: "openbao"
       TNT_CRYPTO_VERIFY_SSL: "false"
       TNT_ENVIRONMENT: "development"
+      TNT_KAFKA_ENABLED: "true"
+      TNT_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      TNT_KAFKA_AUDIT_TOPIC: "tnt.audit"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       openbao:
-        condition: service_started
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/ready')"]
       interval: 10s
@@ -96,6 +137,8 @@ services:
   #     PG_PORT: "5432"
   #     REDIS_HOST: "redis"
   #     REDIS_PORT: "6379"
+  #     KAFKA_HOST: "kafka"
+  #     KAFKA_PORT: "9092"
   #   volumes:
   #     - ./control-plane:/app
   #     - /app/node_modules
@@ -120,3 +163,4 @@ services:
 volumes:
   pgdata:
   softhsm-tokens:
+  kafka-data:
