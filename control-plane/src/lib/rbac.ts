@@ -77,7 +77,7 @@ export const ROLE_PERMISSIONS: Record<Role, string[]> = {
     "view_dashboard", "view_audit", "view_keys", "view_policies",
     "rotate_key", "seal_vault", "unseal_vault", "init_vault",
     "create_policy", "generate_secret_id", "backup", "restore",
-    "approve_action", "delete_key",
+    "approve_action", "delete_key", "create_namespace",
   ],
   operator: [
     "view_dashboard", "view_audit", "view_keys", "view_policies",
