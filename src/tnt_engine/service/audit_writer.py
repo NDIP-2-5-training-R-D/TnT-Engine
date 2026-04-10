@@ -11,6 +11,11 @@ Replaces the fire-and-forget audit pattern with guaranteed delivery:
 The DLQ file is an append-only JSONL file that can be replayed via
 the admin API or a recovery script.
 
+If a Kafka producer is provided, every batch is also tee'd to a Kafka
+topic before the DB write. This keeps audit entries durable even when
+the pod (and its local DLQ file) is killed — a very real failure mode
+under Kubernetes, where ephemeral storage disappears with the pod.
+
 Security invariants:
   - Audit entries are NEVER silently discarded
   - Buffer overflow triggers early flush, not data loss
@@ -28,6 +33,7 @@ from collections import deque
 from datetime import datetime, timezone
 
 from tnt_engine.config import Settings
+from tnt_engine.events.kafka_producer import KafkaAuditProducer
 from tnt_engine.logging import get_logger
 from tnt_engine.metrics import (
     AUDIT_BUFFER_SIZE,
@@ -55,7 +61,12 @@ class ReliableAuditWriter:
         await writer.stop()
     """
 
-    def __init__(self, repo: object, settings: Settings) -> None:
+    def __init__(
+        self,
+        repo: object,
+        settings: Settings,
+        kafka_producer: KafkaAuditProducer | None = None,
+    ) -> None:
         self._repo = repo
         self._buffer: deque[AuditEntry] = deque()
         self._max_size = settings.audit_buffer_max_size
@@ -64,6 +75,7 @@ class ReliableAuditWriter:
         self._max_retries = settings.audit_max_retries
         self._retry_backoff = settings.audit_retry_backoff_seconds
         self._dlq_path = settings.audit_dlq_path
+        self._kafka = kafka_producer
         self._lock = asyncio.Lock()
         self._running = False
         self._task: asyncio.Task | None = None
@@ -165,6 +177,12 @@ class ReliableAuditWriter:
             return 0
 
         AUDIT_BUFFER_SIZE.set(len(self._buffer))
+
+        # Durability tee: publish to Kafka before the DB write so the
+        # entries survive even if the pod dies mid-flush. Kafka failure
+        # is non-fatal — the DB path + DLQ still guarantee no-data-loss.
+        if self._kafka is not None and self._kafka.started:
+            await self._kafka.publish_batch(batch)
 
         # Retry loop
         for attempt in range(self._max_retries):

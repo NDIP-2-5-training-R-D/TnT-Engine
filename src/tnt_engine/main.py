@@ -21,6 +21,7 @@ from tnt_engine.crypto.vault_health import VaultHealthChecker
 from tnt_engine.db.connection import Database
 from tnt_engine.db.repository import TokenRepository
 from tnt_engine.events.bus import EventBus
+from tnt_engine.events.kafka_producer import KafkaAuditProducer
 from tnt_engine.governance.classification import ClassificationRegistry
 from tnt_engine.logging import configure_logging
 from tnt_engine.resilience.backpressure import BackpressureMiddleware
@@ -153,8 +154,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     repo = TokenRepository(db)
 
     # ── Audit Writer ─────────────────────────────────────────────
-    # In-memory buffer → PostgreSQL batch writes
-    audit_writer = ReliableAuditWriter(repo, cfg)
+    # In-memory buffer → Kafka (durability tee) → PostgreSQL batch writes.
+    # Kafka is optional and disabled by default; when enabled it protects
+    # audit records from pod-eviction / ephemeral-storage loss.
+    kafka_producer: KafkaAuditProducer | None = None
+    if cfg.kafka_enabled:
+        kafka_producer = KafkaAuditProducer(cfg)
+        await kafka_producer.start()
+
+    audit_writer = ReliableAuditWriter(repo, cfg, kafka_producer=kafka_producer)
     await audit_writer.start()
 
     svc = TokenService(
@@ -230,6 +238,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.cache_rebuild_worker = cache_rebuild_worker
     app.state.vault_token_manager = _token_manager
     app.state.audit_writer = audit_writer
+    app.state.kafka_audit_producer = kafka_producer
 
     # OpenBao health checker (for /health and /ready endpoints)
     vault_health_checker = VaultHealthChecker(cfg.crypto_base_url, settings=cfg)
@@ -240,6 +249,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ── Graceful shutdown ────────────────────────────────────────
     await shutdown.initiate()
     await audit_writer.stop()  # Drain audit buffer before closing DB
+    if kafka_producer is not None:
+        await kafka_producer.stop()
     await cleanup_worker.stop()
     await vault_health_checker.close()
     await cb_backend.close()
