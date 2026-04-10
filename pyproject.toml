@@ -15,6 +15,7 @@ dependencies = [
     "tenacity>=8.3.0",
     "prometheus-client>=0.20.0",
     "ff3>=1.0.0",
+    "aiokafka>=0.11.0",
 ]
 
 [project.optional-dependencies]

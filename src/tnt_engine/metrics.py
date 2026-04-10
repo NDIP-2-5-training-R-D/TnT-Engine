@@ -127,6 +127,14 @@ AUDIT_DLQ_SIZE = Gauge(
     "tnt_audit_dlq_file_size_bytes",
     "Size of the audit dead letter queue file on disk",
 )
+AUDIT_KAFKA_PUBLISHED = Counter(
+    "tnt_audit_kafka_published_total",
+    "Audit entries successfully published to the Kafka audit topic",
+)
+AUDIT_KAFKA_FAILURES = Counter(
+    "tnt_audit_kafka_failures_total",
+    "Audit entries the Kafka producer failed to publish",
+)
 
 # ── Reencrypt worker metrics ─────────────────────────────────────────
 
