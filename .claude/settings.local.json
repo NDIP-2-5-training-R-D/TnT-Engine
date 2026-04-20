@@ -8,7 +8,13 @@
       "Bash(helm template:*)",
       "Bash(ls -la /Users/thiennlinh/Documents/GEIC/tnt-engine/*.*)",
       "Bash(wc -l /Users/thiennlinh/Documents/GEIC/tnt-engine/src/tnt_engine/**/*.py)",
-      "Bash(grep -l \"integration\" /Users/thiennlinh/Documents/GEIC/tnt-engine/tests/*.py)"
+      "Bash(grep -l \"integration\" /Users/thiennlinh/Documents/GEIC/tnt-engine/tests/*.py)",
+      "WebFetch(domain:openbao.org)",
+      "WebFetch(domain:docs.konghq.com)",
+      "Bash(chmod +x /home/linhnt1/Desktop/TnT-Engine/scripts/ha-*.sh)",
+      "Bash(ls /tmp/*.sh)",
+      "Bash(chmod +x /home/linhnt1/Desktop/TnT-Engine/scripts/k8s-*.sh)",
+      "Bash(ls /tmp/*.sh /tmp/*.yaml /tmp/*.conf /tmp/*.py)"
     ]
   }
 }
